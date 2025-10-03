@@ -1,0 +1,72 @@
+[
+  {
+    "name": "City to Heathrow",
+    "pickup": "Bank, London EC2R",
+    "dropoff": "London Heathrow Airport",
+    "distance": 28,
+    "duration": 55
+  },
+  {
+    "name": "Mayfair to Gatwick", 
+    "pickup": "Mayfair, London W1K",
+    "dropoff": "London Gatwick Airport",
+    "distance": 45,
+    "duration": 70
+  },
+  {
+    "name": "Canary Wharf to Stansted",
+    "pickup": "Canary Wharf, London E14",
+    "dropoff": "London Stansted Airport", 
+    "distance": 42,
+    "duration": 65
+  },
+  {
+    "name": "Central London Short Trip",
+    "pickup": "Trafalgar Square, London",
+    "dropoff": "Oxford Circus, London",
+    "distance": 2,
+    "duration": 15
+  },
+  {
+    "name": "Westminster to City",
+    "pickup": "Westminster, London SW1A",
+    "dropoff": "Liverpool Street, London EC2M",
+    "distance": 5,
+    "duration": 25
+  },
+  {
+    "name": "Kensington to Camden",
+    "pickup": "Kensington, London W8", 
+    "dropoff": "Camden Town, London NW1",
+    "distance": 8,
+    "duration": 35
+  },
+  {
+    "name": "Paddington to Greenwich",
+    "pickup": "Paddington Station, London W2",
+    "dropoff": "Greenwich, London SE10",
+    "distance": 12,
+    "duration": 40
+  },
+  {
+    "name": "Shoreditch to Wimbledon",
+    "pickup": "Shoreditch, London E1",
+    "dropoff": "Wimbledon, London SW19", 
+    "distance": 18,
+    "duration": 50
+  },
+  {
+    "name": "Heathrow to Windsor (Out of Town)",
+    "pickup": "London Heathrow Airport",
+    "dropoff": "Windsor Castle, Windsor",
+    "distance": 8,
+    "duration": 25
+  },
+  {
+    "name": "Central to Luton Airport",
+    "pickup": "Covent Garden, London WC2E",
+    "dropoff": "London Luton Airport",
+    "distance": 52,
+    "duration": 75
+  }
+]
