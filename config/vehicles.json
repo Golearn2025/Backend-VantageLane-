@@ -1,0 +1,58 @@
+{
+  "executive": {
+    "displayName": "Executive (E-Class)",
+    "description": "Mercedes E-Class, BMW 5 Series or similar",
+    "capacity": 4,
+    "baseFare": 60.00,
+    "minimumFare": 65.00,
+    "distanceRateFirst10km": 2.50,
+    "distanceRateAfter10km": 2.00,
+    "timeRatePerMinute": 0.75,
+    "hourlyRateInTown": 55.00,
+    "hourlyRateOutOfTown": 70.00,
+    "minimumDistanceKm": 5.0,
+    "minimumTimeMinutes": 15
+  },
+  "luxury": {
+    "displayName": "Luxury (S-Class)", 
+    "description": "Mercedes S-Class, BMW 7 Series or similar",
+    "capacity": 4,
+    "baseFare": 90.00,
+    "minimumFare": 100.00,
+    "distanceRateFirst10km": 3.00,
+    "distanceRateAfter10km": 2.50,
+    "timeRatePerMinute": 1.00,
+    "hourlyRateInTown": 80.00,
+    "hourlyRateOutOfTown": 95.00,
+    "minimumDistanceKm": 5.0,
+    "minimumTimeMinutes": 15
+  },
+  "suv": {
+    "displayName": "SUV (Range Rover)",
+    "description": "Range Rover, Mercedes GLS or similar", 
+    "capacity": 6,
+    "baseFare": 120.00,
+    "minimumFare": 120.00,
+    "distanceRateFirst10km": 3.50,
+    "distanceRateAfter10km": 3.00,
+    "timeRatePerMinute": 1.25,
+    "hourlyRateInTown": 110.00,
+    "hourlyRateOutOfTown": 125.00,
+    "minimumDistanceKm": 5.0,
+    "minimumTimeMinutes": 15
+  },
+  "van": {
+    "displayName": "Van/MPV (V-Class)",
+    "description": "Mercedes V-Class or similar",
+    "capacity": 8,
+    "baseFare": 100.00,
+    "minimumFare": 100.00,
+    "distanceRateFirst10km": 3.25,
+    "distanceRateAfter10km": 2.75,
+    "timeRatePerMinute": 1.10,
+    "hourlyRateInTown": 90.00,
+    "hourlyRateOutOfTown": 105.00,
+    "minimumDistanceKm": 5.0,
+    "minimumTimeMinutes": 15
+  }
+}

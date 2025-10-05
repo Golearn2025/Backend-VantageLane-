@@ -16,6 +16,7 @@ config();
 import pricingRoutes from './routes/pricing';
 import testingRoutes from './routes/testing';
 import configRoutes from './routes/config';
+import adminRoutes from './routes/admin';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -48,6 +49,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api/pricing', pricingRoutes);
 app.use('/api/testing', testingRoutes);
 app.use('/api/config', configRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -58,7 +60,8 @@ app.get('/', (req, res) => {
     endpoints: {
       pricing: '/api/pricing',
       testing: '/api/testing',
-      config: '/api/config'
+      config: '/api/config',
+      admin: '/api/admin'
     },
     timestamp: new Date().toISOString()
   });
@@ -103,6 +106,7 @@ app.listen(PORT, () => {
   console.log(`💰 Pricing API: http://localhost:${PORT}/api/pricing`);
   console.log(`🧪 Testing API: http://localhost:${PORT}/api/testing`);
   console.log(`⚙️  Config API: http://localhost:${PORT}/api/config`);
+  console.log(`👨‍💼 Admin API: http://localhost:${PORT}/api/admin`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
