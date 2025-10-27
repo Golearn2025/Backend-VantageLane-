@@ -122,6 +122,7 @@ export interface PricingConfig {
   zones: ZoneFees;
   services: ServicePolicies;
   policies: PricingPolicies;
+  premiumServices?: any; // Premium services from Supabase
 }
 
 export interface PricingBreakdownData {

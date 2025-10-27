@@ -75,8 +75,8 @@ export class PricingEngine {
       // Step 4: Zone fees (airports, congestion, tolls)
       this.calculateZoneFees(breakdown, request);
 
-      // Step 5: Additional services
-      this.calculateAdditionalServices(breakdown, request);
+      // Step 5: Additional services (async - reads from Supabase)
+      await this.calculateAdditionalServices(breakdown, request);
 
       // Step 6: Calculate subtotal
       breakdown.subtotal = breakdown.baseFare + breakdown.distanceFee + breakdown.timeFee + 
@@ -263,9 +263,9 @@ export class PricingEngine {
   }
 
   /**
-   * Calculate additional services
+   * Calculate additional services using Supabase premium_services config
    */
-  private static calculateAdditionalServices(breakdown: PricingBreakdownData, request: PricingRequestData): void {
+  private static async calculateAdditionalServices(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
     // Multi-stop fee (if applicable)
     if (request.extras?.includes('multi_stop')) {
       const fee = this.PRICING_CONFIG.services.multiStop;
@@ -277,28 +277,50 @@ export class PricingEngine {
       });
     }
 
-    // Other extras (simplified for now)
+    // Get Supabase config for premium services
+    const { PricingConfigService } = await import('./PricingConfigService');
+    const { PricingConfigAdapter } = await import('./PricingConfigAdapter');
+    const dbConfig = await PricingConfigService.getActivePricingConfig();
+
+    // Other extras - get prices from Supabase
     const extraServices = request.extras?.filter(extra => extra !== 'multi_stop') || [];
     extraServices.forEach(extra => {
-      let fee = 0;
-      let description = '';
-      
-      switch (extra) {
-        case 'child_seat':
-          fee = 15;
-          description = 'Child safety seat';
-          break;
-        case 'champagne':
-          fee = 25;
-          description = 'Champagne service';
-          break;
-        case 'meet_greet':
-          fee = 20;
-          description = 'Meet & greet service';
-          break;
-      }
+      const fee = PricingConfigAdapter.getPremiumServicePrice(dbConfig, extra);
       
       if (fee > 0) {
+        let description = '';
+        
+        switch (extra) {
+          case 'child_seat':
+            description = 'Child safety seat';
+            break;
+          case 'champagne':
+          case 'champagne_premium':
+            description = 'Champagne service (Premium)';
+            break;
+          case 'champagne_exclusive':
+            description = 'Champagne service (Exclusive)';
+            break;
+          case 'flowers':
+          case 'flowers_standard':
+          case 'fresh_flowers':
+            description = 'Fresh flowers (Standard)';
+            break;
+          case 'flowers_premium':
+            description = 'Fresh flowers (Premium)';
+            break;
+          case 'security':
+          case 'security_escort':
+            description = 'Security escort';
+            break;
+          case 'meet_greet':
+          case 'meet_and_greet':
+            description = 'Meet & greet service';
+            break;
+          default:
+            description = extra.replace(/_/g, ' ');
+        }
+        
         breakdown.extraServices += fee;
         breakdown.details.push({
           component: 'extra_service',

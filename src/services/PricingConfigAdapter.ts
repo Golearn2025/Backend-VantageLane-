@@ -156,7 +156,41 @@ export class PricingConfigAdapter {
           tier1: dbConfig.general_policies.corporate_discounts.tier1,
           tier2: dbConfig.general_policies.corporate_discounts.tier2
         }
-      }
+      },
+      
+      premiumServices: dbConfig.premium_services || {}
     };
+  }
+  
+  /**
+   * Get premium service price from Supabase config
+   */
+  static getPremiumServicePrice(dbConfig: PricingConfigRow, serviceCode: string): number {
+    const services = dbConfig.premium_services || {};
+    
+    // Map service codes to Supabase structure
+    switch (serviceCode) {
+      case 'champagne':
+      case 'champagne_premium':
+        return services.champagne?.premium?.price || 120;
+      case 'champagne_exclusive':
+        return services.champagne?.exclusive?.price || 350;
+      case 'flowers':
+      case 'flowers_standard':
+      case 'fresh_flowers':
+        return services.flowers?.standard?.price || 120;
+      case 'flowers_premium':
+        return services.flowers?.premium?.price || 250;
+      case 'security':
+      case 'security_escort':
+        return services.security?.professional?.price || 750;
+      case 'child_seat':
+        return services.child_seat?.standard?.price || 15;
+      case 'meet_greet':
+      case 'meet_and_greet':
+        return services.meet_greet?.standard?.price || 20;
+      default:
+        return 0;
+    }
   }
 }
