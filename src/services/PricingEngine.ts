@@ -1,6 +1,7 @@
 /**
  * Core Pricing Engine - TypeScript implementation
  * Professional, modular pricing calculation system
+ * NOW POWERED BY SUPABASE! 🚀
  */
 
 import { 
@@ -10,23 +11,32 @@ import {
   BookingType,
   TimePeriod,
   PricingBreakdownData,
-  PricingDetail
+  PricingDetail,
+  PricingConfig
 } from '../types/pricing.types';
-import { PRICING_CONFIG } from '../config/pricing.config';
+import { PricingConfigService } from './PricingConfigService';
+import { PricingConfigAdapter } from './PricingConfigAdapter';
 import { PricingHelpers } from '../utils/PricingHelpers';
 
 export class PricingEngine {
+  // Pricing config - loaded from Supabase
+  private static PRICING_CONFIG: PricingConfig;
   
   /**
    * Main method to calculate pricing
+   * NOW ASYNC - fetches config from Supabase
    */
-  public static calculate(request: PricingRequestData): PricingResult {
+  public static async calculate(request: PricingRequestData): Promise<PricingResult> {
     try {
       // Validate request
       const validationError = this.validateRequest(request);
       if (validationError) {
         return this.createErrorResponse(validationError, 400);
       }
+
+      // Fetch pricing config from Supabase (with caching)
+      const dbConfig = await PricingConfigService.getActivePricingConfig();
+      this.PRICING_CONFIG = PricingConfigAdapter.toPricingConfig(dbConfig);
 
       // Initialize breakdown
       const breakdown: PricingBreakdownData = {
@@ -85,7 +95,7 @@ export class PricingEngine {
       // Step 10: Apply rounding
       breakdown.finalPrice = PricingHelpers.applyRounding(
         breakdown.finalPrice || breakdown.subtotal, 
-        PRICING_CONFIG.policies.rounding
+        this.PRICING_CONFIG.policies.rounding
       );
 
       return this.createSuccessResponse(breakdown);
@@ -125,7 +135,7 @@ export class PricingEngine {
    * Calculate base fare
    */
   private static calculateBaseFare(breakdown: PricingBreakdownData, request: PricingRequestData): void {
-    const vehicleConfig = PRICING_CONFIG.vehicles[request.vehicleType];
+    const vehicleConfig = this.PRICING_CONFIG.vehicles[request.vehicleType];
     breakdown.baseFare = vehicleConfig.rates.base;
     
     breakdown.details.push({
@@ -141,7 +151,7 @@ export class PricingEngine {
   private static calculateHourlyFee(breakdown: PricingBreakdownData, request: PricingRequestData): void {
     if (!request.duration) return;
 
-    const vehicleConfig = PRICING_CONFIG.vehicles[request.vehicleType];
+    const vehicleConfig = this.PRICING_CONFIG.vehicles[request.vehicleType];
     const hours = request.duration / 60; // Convert minutes to hours
     
     // Use in-town or out-of-town rate based on distance (simple heuristic)
@@ -168,8 +178,8 @@ export class PricingEngine {
   private static calculateDistanceFee(breakdown: PricingBreakdownData, request: PricingRequestData): void {
     if (!request.distance) return;
 
-    const vehicleConfig = PRICING_CONFIG.vehicles[request.vehicleType];
-    const minimumMiles = PRICING_CONFIG.services.minimums.distance;
+    const vehicleConfig = this.PRICING_CONFIG.vehicles[request.vehicleType];
+    const minimumMiles = this.PRICING_CONFIG.services.minimums.distance;
     
     // Convert km to miles if needed (Google Maps returns km, but we price in miles)
     const distanceInMiles = request.distance * 0.621371; // km to miles conversion
@@ -196,8 +206,8 @@ export class PricingEngine {
   private static calculateTimeFee(breakdown: PricingBreakdownData, request: PricingRequestData): void {
     if (!request.duration) return;
 
-    const vehicleConfig = PRICING_CONFIG.vehicles[request.vehicleType];
-    const minimumMinutes = PRICING_CONFIG.services.minimums.time;
+    const vehicleConfig = this.PRICING_CONFIG.vehicles[request.vehicleType];
+    const minimumMinutes = this.PRICING_CONFIG.services.minimums.time;
     
     const actualTime = Math.max(request.duration, minimumMinutes);
     breakdown.timeFee = actualTime * vehicleConfig.rates.perMin;
@@ -217,8 +227,8 @@ export class PricingEngine {
     const pickupAirport = PricingHelpers.detectAirport(request.pickup);
     const dropoffAirport = PricingHelpers.detectAirport(request.dropoff);
     
-    if (pickupAirport && PRICING_CONFIG.zones.airports[pickupAirport]) {
-      const fee = PRICING_CONFIG.zones.airports[pickupAirport].fee;
+    if (pickupAirport && this.PRICING_CONFIG.zones.airports[pickupAirport]) {
+      const fee = this.PRICING_CONFIG.zones.airports[pickupAirport].fee;
       breakdown.airportFees += fee;
       breakdown.details.push({
         component: 'airport_pickup',
@@ -227,8 +237,8 @@ export class PricingEngine {
       });
     }
     
-    if (dropoffAirport && PRICING_CONFIG.zones.airports[dropoffAirport] && dropoffAirport !== pickupAirport) {
-      const fee = PRICING_CONFIG.zones.airports[dropoffAirport].fee;
+    if (dropoffAirport && this.PRICING_CONFIG.zones.airports[dropoffAirport] && dropoffAirport !== pickupAirport) {
+      const fee = this.PRICING_CONFIG.zones.airports[dropoffAirport].fee;
       breakdown.airportFees += fee;
       breakdown.details.push({
         component: 'airport_dropoff',
@@ -240,8 +250,8 @@ export class PricingEngine {
     // Congestion and zone fees
     const zones = PricingHelpers.detectZones(request.pickup, request.dropoff);
     zones.forEach(zone => {
-      if (PRICING_CONFIG.zones.congestion[zone]) {
-        const fee = PRICING_CONFIG.zones.congestion[zone];
+      if (this.PRICING_CONFIG.zones.congestion[zone]) {
+        const fee = this.PRICING_CONFIG.zones.congestion[zone];
         breakdown.zoneFees += fee;
         breakdown.details.push({
           component: 'zone_fee',
@@ -258,7 +268,7 @@ export class PricingEngine {
   private static calculateAdditionalServices(breakdown: PricingBreakdownData, request: PricingRequestData): void {
     // Multi-stop fee (if applicable)
     if (request.extras?.includes('multi_stop')) {
-      const fee = PRICING_CONFIG.services.multiStop;
+      const fee = this.PRICING_CONFIG.services.multiStop;
       breakdown.multiStopFees += fee;
       breakdown.details.push({
         component: 'multi_stop',
@@ -305,7 +315,7 @@ export class PricingEngine {
   private static applyMultipliers(breakdown: PricingBreakdownData, request: PricingRequestData): void {
     const dateTime = new Date(request.dateTime);
     const timePeriod = PricingHelpers.getTimePeriod(dateTime);
-    const multiplier = PRICING_CONFIG.multipliers.time[timePeriod];
+    const multiplier = this.PRICING_CONFIG.multipliers.time[timePeriod];
     
     if (multiplier !== 1.0) {
       const multiplierAmount = breakdown.subtotal * (multiplier - 1);
@@ -329,9 +339,9 @@ export class PricingEngine {
       let discountRate = 0;
       
       if (request.corporateTier === 'tier1') {
-        discountRate = PRICING_CONFIG.policies.corporate.tier1;
+        discountRate = this.PRICING_CONFIG.policies.corporate.tier1;
       } else if (request.corporateTier === 'tier2') {
-        discountRate = PRICING_CONFIG.policies.corporate.tier2;
+        discountRate = this.PRICING_CONFIG.policies.corporate.tier2;
       }
       
       if (discountRate > 0) {
@@ -353,7 +363,7 @@ export class PricingEngine {
    * Apply minimum fare policy
    */
   private static applyMinimumFare(breakdown: PricingBreakdownData, request: PricingRequestData): void {
-    const vehicleConfig = PRICING_CONFIG.vehicles[request.vehicleType];
+    const vehicleConfig = this.PRICING_CONFIG.vehicles[request.vehicleType];
     const minimumFare = vehicleConfig.rates.minimum;
     
     if (breakdown.subtotal < minimumFare) {

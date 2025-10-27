@@ -17,7 +17,8 @@
     "express-rate-limit": "^7.1.5",
     "axios": "^1.6.0",
     "moment": "^2.29.4",
-    "express-validator": "^7.0.1"
+    "express-validator": "^7.0.1",
+    "@supabase/supabase-js": "^2.39.0"
   },
   "devDependencies": {
     "typescript": "^5.2.2",

@@ -30,6 +30,13 @@ const pricingValidation = [
 router.post('/calculate', pricingValidation, PricingController.calculatePrice);
 
 /**
+ * @route POST /api/pricing/calculate-with-commissions
+ * @desc Calculate price WITH platform/operator/driver commissions
+ * @access Public
+ */
+router.post('/calculate-with-commissions', pricingValidation, PricingController.calculateWithCommissions);
+
+/**
  * @route GET /api/pricing/health
  * @desc Health check for pricing service
  * @access Public

@@ -17,6 +17,7 @@ import pricingRoutes from './routes/pricing';
 import testingRoutes from './routes/testing';
 import configRoutes from './routes/config';
 import adminRoutes from './routes/admin';
+import cacheRoutes from './routes/cache.routes';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -50,6 +51,7 @@ app.use('/api/pricing', pricingRoutes);
 app.use('/api/testing', testingRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/cache', cacheRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
