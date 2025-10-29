@@ -14,6 +14,7 @@ export interface GoogleMapsResult {
     pickup: Coordinates;
     dropoff: Coordinates;
   };
+  route?: any;
   error?: string;
 }
 
@@ -145,6 +146,58 @@ export class GoogleMapsService {
       return {
         success: false,
         error: 'Distance Matrix API request failed'
+      };
+    }
+  }
+
+  /**
+   * Get detailed route using Directions API (for toll road detection)
+   */
+  public static async getDetailedRoute(
+    origin: string,
+    destination: string
+  ): Promise<GoogleMapsResult> {
+    try {
+      const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+      
+      if (!apiKey) {
+        return {
+          success: false,
+          error: 'Google Maps API key not configured'
+        };
+      }
+
+      const response = await axios.get(`${this.BASE_URL}/directions/json`, {
+        params: {
+          origin: origin,
+          destination: destination,
+          mode: 'driving',
+          key: apiKey
+        }
+      });
+
+      if (response.data.status === 'OK' && response.data.routes.length > 0) {
+        const route = response.data.routes[0];
+        const leg = route.legs[0];
+        
+        return {
+          success: true,
+          distance: leg.distance.value / 1000, // km
+          duration: Math.round(leg.duration.value / 60), // minutes
+          route: route
+        };
+      }
+
+      return {
+        success: false,
+        error: 'No route found'
+      };
+
+    } catch (error) {
+      console.error('Directions API error:', error);
+      return {
+        success: false,
+        error: 'Directions API request failed'
       };
     }
   }

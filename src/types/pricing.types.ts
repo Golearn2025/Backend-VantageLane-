@@ -38,12 +38,14 @@ export interface PricingRequestData {
   dateTime: string;
   distance?: number;
   duration?: number;
+  hours?: number; // For hourly bookings
   coordinates?: {
     pickup: Coordinates;
     dropoff: Coordinates;
   };
   extras?: string[];
   corporateTier?: string;
+  fleetConfig?: Record<string, number>; // For fleet bookings
 }
 
 export interface VehicleRates {

@@ -17,6 +17,8 @@ import {
 import { PricingConfigService } from './PricingConfigService';
 import { PricingConfigAdapter } from './PricingConfigAdapter';
 import { PricingHelpers } from '../utils/PricingHelpers';
+import { TollRoadDetector } from '../utils/TollRoadDetector';
+import { GoogleMapsService } from './GoogleMapsService';
 
 export class PricingEngine {
   // Pricing config - loaded from Supabase
@@ -56,8 +58,10 @@ export class PricingEngine {
         details: []
       };
 
-      // Step 1: Base fare
-      this.calculateBaseFare(breakdown, request);
+      // Step 1: Base fare (NOT for hourly bookings - hourly is flat rate per hour)
+      if (request.bookingType !== BookingType.HOURLY) {
+        this.calculateBaseFare(breakdown, request);
+      }
 
       // Step 2: Calculate main fare (distance/time vs hourly)
       if (request.bookingType === BookingType.HOURLY) {
@@ -72,8 +76,11 @@ export class PricingEngine {
         }
       }
 
-      // Step 4: Zone fees (airports, congestion, tolls)
+      // Step 4: Zone fees (airports, congestion)
       this.calculateZoneFees(breakdown, request);
+
+      // Step 4.5: Toll roads detection (async)
+      await this.calculateTollFees(breakdown, request);
 
       // Step 5: Additional services (async - reads from Supabase)
       await this.calculateAdditionalServices(breakdown, request);
@@ -82,6 +89,16 @@ export class PricingEngine {
       breakdown.subtotal = breakdown.baseFare + breakdown.distanceFee + breakdown.timeFee + 
                           breakdown.airportFees + breakdown.zoneFees + breakdown.tollFees + 
                           breakdown.multiStopFees + breakdown.waitingFees + breakdown.extraServices;
+
+      // Step 6.5: Apply RETURN trip logic (x2 with discount)
+      if (request.bookingType === BookingType.RETURN) {
+        this.applyReturnTripLogic(breakdown, request);
+      }
+
+      // Step 6.6: Apply FLEET logic (multiple vehicles)
+      if (request.bookingType === BookingType.FLEET && request.fleetConfig) {
+        this.applyFleetLogic(breakdown, request);
+      }
 
       // Step 7: Apply multipliers
       this.applyMultipliers(breakdown, request);
@@ -93,8 +110,10 @@ export class PricingEngine {
       this.applyMinimumFare(breakdown, request);
 
       // Step 10: Apply rounding
+      // Calculate final price BEFORE rounding: subtotal - discounts
+      const priceBeforeRounding = breakdown.finalPrice || (breakdown.subtotal - breakdown.discounts);
       breakdown.finalPrice = PricingHelpers.applyRounding(
-        breakdown.finalPrice || breakdown.subtotal, 
+        priceBeforeRounding, 
         this.PRICING_CONFIG.policies.rounding
       );
 
@@ -149,17 +168,28 @@ export class PricingEngine {
    * Calculate hourly fee for hourly bookings
    */
   private static calculateHourlyFee(breakdown: PricingBreakdownData, request: PricingRequestData): void {
-    if (!request.duration) return;
+    // Get hours from request (default to 3 if not provided)
+    const requestedHours = request.hours || 3;
+    
+    // Get hourly settings from Supabase config (for min/max hours)
+    const hourlySettings = (this.PRICING_CONFIG as any).hourly_settings || {
+      minimum_hours: 3,
+      maximum_hours: 12,
+      distance_limit_per_hour: 15
+    };
+    
+    // Apply min/max hours
+    const billableHours = Math.min(
+      Math.max(requestedHours, hourlySettings.minimum_hours),
+      hourlySettings.maximum_hours
+    );
 
+    // Get hourly rate from vehicle config (in-town rate = first value)
     const vehicleConfig = this.PRICING_CONFIG.vehicles[request.vehicleType];
-    const hours = request.duration / 60; // Convert minutes to hours
+    const hourlyRate = Array.isArray(vehicleConfig.rates.hourly) 
+      ? vehicleConfig.rates.hourly[0]  // Use in-town rate
+      : vehicleConfig.rates.hourly;
     
-    // Use in-town or out-of-town rate based on distance (simple heuristic)
-    const isOutOfTown = (request.distance || 0) > 25; // 25+ miles = out of town
-    const hourlyRate = isOutOfTown ? vehicleConfig.rates.hourly[1] : vehicleConfig.rates.hourly[0];
-    
-    // Minimum 3 hours for hourly bookings (industry standard)
-    const billableHours = Math.max(hours, 3);
     const hourlyFee = billableHours * hourlyRate;
     
     // Store in timeFee field for consistency
@@ -168,7 +198,7 @@ export class PricingEngine {
     breakdown.details.push({
       component: 'hourly_fee',
       amount: hourlyFee,
-      description: `${billableHours.toFixed(1)} hours at £${hourlyRate}/hr ${isOutOfTown ? '(out-of-town)' : '(in-town)'}`
+      description: `${billableHours} hours at £${hourlyRate}/hr`
     });
   }
 
@@ -260,6 +290,196 @@ export class PricingEngine {
         });
       }
     });
+  }
+
+  /**
+   * Calculate toll fees by detecting toll roads in route
+   */
+  private static async calculateTollFees(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
+    try {
+      // Get detailed route from Google Maps
+      const routeData = await GoogleMapsService.getDetailedRoute(request.pickup, request.dropoff);
+      
+      if (!routeData.success || !routeData.route) {
+        // If route detection fails, skip toll fees
+        return;
+      }
+
+      // Detect toll roads from route
+      const tollRoads = TollRoadDetector.detectTollRoads(routeData.route);
+      
+      // Add toll fees
+      tollRoads.forEach(tollCode => {
+        const fee = TollRoadDetector.getTollFee(tollCode, this.PRICING_CONFIG);
+        
+        if (fee > 0) {
+          breakdown.tollFees += fee;
+          
+          const tollNames: Record<string, string> = {
+            'dartford': 'Dartford Crossing',
+            'm6': 'M6 Toll'
+          };
+          
+          breakdown.details.push({
+            component: 'toll_fee',
+            amount: fee,
+            description: `${tollNames[tollCode] || tollCode} toll`
+          });
+        }
+      });
+    } catch (error) {
+      console.error('Error calculating toll fees:', error);
+      // Don't fail the whole pricing if toll detection fails
+    }
+  }
+
+  /**
+   * Apply RETURN trip logic: (subtotal × 2) - discount
+   */
+  private static applyReturnTripLogic(breakdown: PricingBreakdownData, request: PricingRequestData): void {
+    const returnSettings = (this.PRICING_CONFIG as any).return_settings || {
+      discount_rate: 0.10,
+      minimum_hours_between: 2
+    };
+
+    // Double the subtotal (outbound + return)
+    const originalSubtotal = breakdown.subtotal;
+    breakdown.subtotal = originalSubtotal * 2;
+
+    // Apply return discount
+    const discountAmount = breakdown.subtotal * returnSettings.discount_rate;
+    breakdown.discounts += discountAmount;
+    
+    // Subtract discount from subtotal for return trips
+    breakdown.subtotal -= discountAmount;
+
+    breakdown.details.push({
+      component: 'return_trip',
+      amount: originalSubtotal,
+      description: 'Return trip (outbound + return)'
+    });
+
+    breakdown.details.push({
+      component: 'return_discount',
+      amount: -discountAmount,
+      description: `Return discount (${(returnSettings.discount_rate * 100).toFixed(0)}%)`
+    });
+  }
+
+  /**
+   * Apply FLEET logic: calculate for EACH vehicle type separately
+   */
+  private static applyFleetLogic(breakdown: PricingBreakdownData, request: PricingRequestData): void {
+    if (!request.fleetConfig) return;
+
+    const fleetSettings = (this.PRICING_CONFIG as any).fleet_settings || {
+      discounts: {
+        tier1: { min_vehicles: 3, discount_rate: 0.05 },
+        tier2: { min_vehicles: 5, discount_rate: 0.10 }
+      }
+    };
+
+    // Calculate total vehicles
+    const totalVehicles = Object.values(request.fleetConfig).reduce((sum, count) => sum + count, 0);
+
+    // Reset breakdown to recalculate for fleet
+    let fleetTotal = 0;
+    
+    // Calculate price for EACH vehicle type
+    for (const [vehicleType, count] of Object.entries(request.fleetConfig)) {
+      if (count === 0) continue;
+      
+      const vType = vehicleType as VehicleType;
+      const vehicleConfig = this.PRICING_CONFIG.vehicles[vType];
+      
+      // Calculate price for this vehicle type
+      let vehiclePrice = 0;
+      
+      // Base fare
+      const baseFare = Array.isArray(vehicleConfig.rates.base) 
+        ? vehicleConfig.rates.base[0] 
+        : vehicleConfig.rates.base;
+      vehiclePrice += baseFare;
+      
+      // Distance fee
+      if (request.distance) {
+        const distanceFee = this.calculateDistanceFeeForVehicle(request.distance, vType);
+        vehiclePrice += distanceFee;
+      }
+      
+      // Time fee
+      if (request.duration) {
+        const perMinRate = vehicleConfig.rates.perMin;
+        const timeFee = request.duration * perMinRate;
+        vehiclePrice += timeFee;
+      }
+      
+      // Airport fees (same for all vehicles)
+      vehiclePrice += breakdown.airportFees / (breakdown.baseFare > 0 ? 1 : totalVehicles);
+      
+      // Zone fees (same for all vehicles)
+      vehiclePrice += breakdown.zoneFees / (breakdown.baseFare > 0 ? 1 : totalVehicles);
+      
+      // Apply minimum fare for this vehicle type
+      const minimumFare = vehicleConfig.rates.minimum;
+      const finalPricePerVehicle = Math.max(vehiclePrice, minimumFare);
+      
+      // Total for this vehicle type
+      const totalForType = finalPricePerVehicle * count;
+      fleetTotal += totalForType;
+      
+      // Add detail for this vehicle type
+      breakdown.details.push({
+        component: 'fleet_vehicle',
+        amount: totalForType,
+        description: `${count} × ${vehicleConfig.name} @ £${finalPricePerVehicle.toFixed(2)} each`
+      });
+    }
+    
+    // Update subtotal with fleet total
+    breakdown.subtotal = fleetTotal;
+
+    // Apply fleet discount based on tier
+    let discountRate = 0;
+    if (totalVehicles >= fleetSettings.discounts.tier2.min_vehicles) {
+      discountRate = fleetSettings.discounts.tier2.discount_rate;
+    } else if (totalVehicles >= fleetSettings.discounts.tier1.min_vehicles) {
+      discountRate = fleetSettings.discounts.tier1.discount_rate;
+    }
+
+    if (discountRate > 0) {
+      const discountAmount = breakdown.subtotal * discountRate;
+      breakdown.discounts += discountAmount;
+
+      breakdown.details.push({
+        component: 'fleet_discount',
+        amount: -discountAmount,
+        description: `Fleet discount (${totalVehicles} vehicles, ${(discountRate * 100).toFixed(0)}%)`
+      });
+    }
+
+    breakdown.details.push({
+      component: 'fleet_total',
+      amount: fleetTotal,
+      description: `Total for ${totalVehicles} vehicles`
+    });
+  }
+  
+  /**
+   * Helper: Calculate distance fee for a specific vehicle type
+   */
+  private static calculateDistanceFeeForVehicle(distanceMiles: number, vehicleType: VehicleType): number {
+    const vehicleConfig = this.PRICING_CONFIG.vehicles[vehicleType];
+    const perMileRates = vehicleConfig.rates.perMile;
+    
+    // Tiered pricing: different rates for first 6 miles vs 6+ miles
+    const tier1Miles = Math.min(distanceMiles, 6);
+    const tier2Miles = Math.max(0, distanceMiles - 6);
+    
+    const tier1Rate = Array.isArray(perMileRates) ? perMileRates[0] : perMileRates;
+    const tier2Rate = Array.isArray(perMileRates) ? perMileRates[1] : perMileRates;
+    
+    return (tier1Miles * tier1Rate) + (tier2Miles * tier2Rate);
   }
 
   /**
