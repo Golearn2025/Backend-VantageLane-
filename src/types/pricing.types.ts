@@ -150,6 +150,49 @@ export interface PricingDetail {
   description: string;
 }
 
+/**
+ * Leg breakdown for RETURN and FLEET bookings
+ */
+export interface LegBreakdown {
+  leg_number: number;
+  leg_type: 'outbound' | 'return' | 'vehicle'; // outbound/return for RETURN, vehicle for FLEET
+  vehicle_category?: string; // For FLEET: 'EXEC', 'LUX', 'SUV', 'VAN'
+  vehicle_index?: number; // For FLEET: 1, 2, 3... (which vehicle of this category)
+  pickup_location?: string;
+  destination?: string;
+  scheduled_at?: string;
+  distance_miles?: number;
+  duration_min?: number;
+  
+  // Pricing breakdown per leg
+  pricing: {
+    baseFare: number;
+    distanceFee: number;
+    timeFee: number;
+    airportFees: number;
+    zoneFees: number;
+    tollFees: number;
+    extraServices: number;
+    subtotal: number;
+    leg_price: number; // Final price for this leg
+  };
+  
+  // Commission breakdown per leg
+  platform_fee: number;
+  operator_net: number;
+  driver_payout: number;
+}
+
+/**
+ * Fleet summary per vehicle category
+ */
+export interface FleetCategorySummary {
+  category: string; // 'EXEC', 'LUX', 'SUV', 'VAN'
+  count: number;
+  unit_price: number;
+  total: number;
+}
+
 export interface PricingResult {
   success: boolean;
   finalPrice?: number;
@@ -166,6 +209,13 @@ export interface PricingResult {
     finalPrice: number;
   };
   details?: PricingDetail[];
+  
+  // ✅ NEW: Legs breakdown for RETURN and FLEET
+  legs?: LegBreakdown[];
+  
+  // ✅ NEW: Fleet summary (only for FLEET bookings)
+  fleet_summary?: FleetCategorySummary[];
+  
   error?: string;
   code?: number;
   timestamp: string;

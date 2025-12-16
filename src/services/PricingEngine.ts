@@ -12,7 +12,9 @@ import {
   TimePeriod,
   PricingBreakdownData,
   PricingDetail,
-  PricingConfig
+  PricingConfig,
+  LegBreakdown,
+  FleetCategorySummary
 } from '../types/pricing.types';
 import { PricingConfigService } from './PricingConfigService';
 import { PricingConfigAdapter } from './PricingConfigAdapter';
@@ -117,7 +119,7 @@ export class PricingEngine {
         this.PRICING_CONFIG.policies.rounding
       );
 
-      return this.createSuccessResponse(breakdown);
+      return this.createSuccessResponse(breakdown, request);
 
     } catch (error) {
       return this.createErrorResponse(
@@ -622,10 +624,191 @@ export class PricingEngine {
   }
 
   /**
+   * Generate legs breakdown for RETURN bookings
+   */
+  private static generateReturnLegs(breakdown: PricingBreakdownData, request: PricingRequestData): LegBreakdown[] {
+    // Calculate price per leg (after discount split)
+    const pricePerLeg = breakdown.finalPrice / 2;
+    
+    // Platform commission (default 10%)
+    const platformPct = 0.10;
+    const driverPct = 0.20;
+    
+    const platformFeePerLeg = pricePerLeg * platformPct;
+    const operatorNetPerLeg = pricePerLeg - platformFeePerLeg;
+    const driverPayoutPerLeg = operatorNetPerLeg * (1 - driverPct);
+
+    // Base pricing per leg (before discount)
+    const basePricing = {
+      baseFare: breakdown.baseFare,
+      distanceFee: breakdown.distanceFee,
+      timeFee: breakdown.timeFee,
+      airportFees: breakdown.airportFees,
+      zoneFees: breakdown.zoneFees,
+      tollFees: breakdown.tollFees,
+      extraServices: breakdown.extraServices / 2, // Split services
+      subtotal: breakdown.baseFare + breakdown.distanceFee + breakdown.timeFee + 
+                breakdown.airportFees + breakdown.zoneFees + breakdown.tollFees,
+      leg_price: pricePerLeg
+    };
+
+    return [
+      {
+        leg_number: 1,
+        leg_type: 'outbound',
+        pickup_location: request.pickup,
+        destination: request.dropoff,
+        scheduled_at: request.dateTime,
+        distance_miles: request.distance,
+        duration_min: request.duration,
+        pricing: basePricing,
+        platform_fee: Number(platformFeePerLeg.toFixed(2)),
+        operator_net: Number(operatorNetPerLeg.toFixed(2)),
+        driver_payout: Number(driverPayoutPerLeg.toFixed(2))
+      },
+      {
+        leg_number: 2,
+        leg_type: 'return',
+        pickup_location: request.dropoff,
+        destination: request.pickup,
+        // Return scheduled time would come from request if available
+        distance_miles: request.distance,
+        duration_min: request.duration,
+        pricing: basePricing,
+        platform_fee: Number(platformFeePerLeg.toFixed(2)),
+        operator_net: Number(operatorNetPerLeg.toFixed(2)),
+        driver_payout: Number(driverPayoutPerLeg.toFixed(2))
+      }
+    ];
+  }
+
+  /**
+   * Generate legs breakdown for FLEET bookings
+   */
+  private static generateFleetLegs(
+    breakdown: PricingBreakdownData, 
+    request: PricingRequestData
+  ): { legs: LegBreakdown[]; summary: FleetCategorySummary[] } {
+    const legs: LegBreakdown[] = [];
+    const summary: FleetCategorySummary[] = [];
+    
+    const platformPct = 0.10;
+    const driverPct = 0.20;
+    
+    let legNumber = 1;
+    
+    // Map vehicle types to categories
+    const vehicleMap: Record<string, string> = {
+      'fleet_executive': 'EXEC',
+      'fleet_s_class': 'LUX',
+      'fleet_v_class': 'VAN',
+      'fleet_suv': 'SUV'
+    };
+
+    // Process each vehicle type in fleet
+    for (const [fleetKey, count] of Object.entries(request.fleetConfig || {})) {
+      if (count === 0) continue;
+      
+      const category = vehicleMap[fleetKey] || 'EXEC';
+      const vehicleType = this.getVehicleTypeFromCategory(category);
+      const vehicleConfig = this.PRICING_CONFIG.vehicles[vehicleType];
+      
+      // Calculate price per vehicle of this type
+      let vehiclePrice = 0;
+      
+      // Base fare
+      const baseFare = Array.isArray(vehicleConfig.rates.base) 
+        ? vehicleConfig.rates.base[0] 
+        : vehicleConfig.rates.base;
+      vehiclePrice += baseFare;
+      
+      // Distance fee
+      if (request.distance) {
+        const distanceFee = this.calculateDistanceFeeForVehicle(request.distance, vehicleType);
+        vehiclePrice += distanceFee;
+      }
+      
+      // Time fee
+      if (request.duration) {
+        const timeFee = request.duration * vehicleConfig.rates.perMin;
+        vehiclePrice += timeFee;
+      }
+      
+      // Airport fees (split among all vehicles)
+      const totalVehicles = Object.values(request.fleetConfig || {}).reduce((sum, c) => sum + c, 0);
+      const airportFeePerVehicle = breakdown.airportFees / totalVehicles;
+      const zoneFeePerVehicle = breakdown.zoneFees / totalVehicles;
+      
+      vehiclePrice += airportFeePerVehicle + zoneFeePerVehicle;
+      
+      // Apply minimum fare
+      const minimumFare = vehicleConfig.rates.minimum;
+      const finalPricePerVehicle = Math.max(vehiclePrice, minimumFare);
+      
+      // Calculate commissions
+      const platformFee = finalPricePerVehicle * platformPct;
+      const operatorNet = finalPricePerVehicle - platformFee;
+      const driverPayout = operatorNet * (1 - driverPct);
+      
+      // Create legs for each vehicle of this type
+      for (let i = 1; i <= count; i++) {
+        legs.push({
+          leg_number: legNumber++,
+          leg_type: 'vehicle',
+          vehicle_category: category,
+          vehicle_index: i,
+          pickup_location: request.pickup,
+          destination: request.dropoff,
+          scheduled_at: request.dateTime,
+          distance_miles: request.distance,
+          duration_min: request.duration,
+          pricing: {
+            baseFare,
+            distanceFee: request.distance ? this.calculateDistanceFeeForVehicle(request.distance, vehicleType) : 0,
+            timeFee: request.duration ? request.duration * vehicleConfig.rates.perMin : 0,
+            airportFees: airportFeePerVehicle,
+            zoneFees: zoneFeePerVehicle,
+            tollFees: 0,
+            extraServices: 0,
+            subtotal: vehiclePrice,
+            leg_price: finalPricePerVehicle
+          },
+          platform_fee: Number(platformFee.toFixed(2)),
+          operator_net: Number(operatorNet.toFixed(2)),
+          driver_payout: Number(driverPayout.toFixed(2))
+        });
+      }
+      
+      // Add to summary
+      summary.push({
+        category,
+        count,
+        unit_price: Number(finalPricePerVehicle.toFixed(2)),
+        total: Number((finalPricePerVehicle * count).toFixed(2))
+      });
+    }
+    
+    return { legs, summary };
+  }
+
+  /**
+   * Helper: Get VehicleType from category string
+   */
+  private static getVehicleTypeFromCategory(category: string): VehicleType {
+    const map: Record<string, VehicleType> = {
+      'EXEC': VehicleType.EXECUTIVE,
+      'LUX': VehicleType.LUXURY,
+      'SUV': VehicleType.SUV,
+      'VAN': VehicleType.VAN
+    };
+    return map[category] || VehicleType.EXECUTIVE;
+  }
+
+  /**
    * Create success response
    */
-  private static createSuccessResponse(breakdown: PricingBreakdownData): PricingResult {
-    return {
+  private static createSuccessResponse(breakdown: PricingBreakdownData, request: PricingRequestData): PricingResult {
+    const result: PricingResult = {
       success: true,
       finalPrice: breakdown.finalPrice,
       currency: 'GBP',
@@ -643,6 +826,20 @@ export class PricingEngine {
       details: breakdown.details,
       timestamp: new Date().toISOString()
     };
+
+    // ✅ Generate legs breakdown for RETURN bookings
+    if (request.bookingType === BookingType.RETURN) {
+      result.legs = this.generateReturnLegs(breakdown, request);
+    }
+
+    // ✅ Generate legs breakdown for FLEET bookings
+    if (request.bookingType === BookingType.FLEET && request.fleetConfig) {
+      const { legs, summary } = this.generateFleetLegs(breakdown, request);
+      result.legs = legs;
+      result.fleet_summary = summary;
+    }
+
+    return result;
   }
 
   /**
