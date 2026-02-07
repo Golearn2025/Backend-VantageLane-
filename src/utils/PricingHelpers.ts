@@ -12,8 +12,8 @@ export class PricingHelpers {
    * Determine time period based on date/time
    */
   public static getTimePeriod(dateTime: Date): TimePeriod {
-    const hour = dateTime.getHours();
-    const day = dateTime.getDay(); // 0 = Sunday, 6 = Saturday
+    const hour = dateTime.getUTCHours();
+    const day = dateTime.getUTCDay(); // 0 = Sunday, 6 = Saturday
     const timeString = `${hour.toString().padStart(2, '0')}:00`;
 
     // Weekend check

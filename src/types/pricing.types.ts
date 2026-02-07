@@ -14,6 +14,7 @@ export enum BookingType {
   ONE_WAY = 'one_way',
   RETURN = 'return', 
   HOURLY = 'hourly',
+  DAILY = 'daily',
   FLEET = 'fleet'
 }
 
@@ -39,6 +40,7 @@ export interface PricingRequestData {
   distance?: number;
   duration?: number;
   hours?: number; // For hourly bookings
+  days?: number; // For daily bookings
   coordinates?: {
     pickup: Coordinates;
     dropoff: Coordinates;
@@ -53,6 +55,7 @@ export interface VehicleRates {
   perMile: [number, number]; // [first6miles, after6miles]
   perMin: number;
   hourly: [number, number]; // [inTown, outOfTown]
+  daily?: number; // Daily rate (per day)
   minimum: number;
 }
 
@@ -125,6 +128,32 @@ export interface PricingConfig {
   services: ServicePolicies;
   policies: PricingPolicies;
   premiumServices?: any; // Premium services from Supabase
+  hourly_settings?: {
+    rates: Record<string, number>;
+    minimum_hours: number;
+    maximum_hours: number;
+    distance_limit_per_hour?: number;
+    area_restriction?: string;
+  };
+  daily_settings?: {
+    rates: Record<string, number>;
+    minimum_days: number;
+    maximum_days: number;
+    hours_per_day: number;
+    distance_limit_per_day?: number;
+    area_restriction?: string;
+  };
+  return_settings?: {
+    discount_rate: number;
+    minimum_hours_between: number;
+  };
+  fleet_settings?: {
+    discounts: {
+      tier1: { min_vehicles: number; discount_rate: number };
+      tier2: { min_vehicles: number; discount_rate: number };
+    };
+    premium_services_multiply?: boolean;
+  };
 }
 
 export interface PricingBreakdownData {

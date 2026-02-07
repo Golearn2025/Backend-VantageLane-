@@ -18,6 +18,8 @@ const pricingValidation = [
   body('dateTime').isISO8601().withMessage('Valid dateTime is required'),
   body('distance').optional().isFloat({ min: 0 }).withMessage('Distance must be positive'),
   body('duration').optional().isInt({ min: 0 }).withMessage('Duration must be positive'),
+  body('hours').optional().isInt({ min: 1, max: 12 }).withMessage('Hours must be between 1 and 12'),
+  body('days').optional().isInt({ min: 1, max: 30 }).withMessage('Days must be between 1 and 30'),
   body('extras').optional().isArray().withMessage('Extras must be an array'),
   body('corporateTier').optional().isIn(['tier1', 'tier2']).withMessage('Invalid corporate tier')
 ];

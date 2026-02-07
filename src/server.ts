@@ -14,7 +14,6 @@ config();
 
 // Import routes
 import pricingRoutes from './routes/pricing';
-import testingRoutes from './routes/testing';
 import configRoutes from './routes/config';
 import adminRoutes from './routes/admin';
 import cacheRoutes from './routes/cache.routes';
@@ -26,7 +25,7 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 app.use(cors({
   origin: process.env.NODE_ENV === 'production' 
-    ? ['https://your-frontend-domain.com'] 
+    ? (process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : ['https://your-frontend-domain.com']) 
     : [
         'http://localhost:3000', 
         'http://localhost:3001', 
@@ -56,7 +55,6 @@ app.use(express.urlencoded({ extended: true }));
 
 // API Routes
 app.use('/api/pricing', pricingRoutes);
-app.use('/api/testing', testingRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/cache', cacheRoutes);
@@ -69,7 +67,6 @@ app.get('/', (req, res) => {
     version: '1.0.0',
     endpoints: {
       pricing: '/api/pricing',
-      testing: '/api/testing',
       config: '/api/config',
       admin: '/api/admin'
     },
@@ -114,7 +111,6 @@ app.listen(PORT, () => {
   console.log(`🚗 Vantage Lane Pricing Backend running on port ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`💰 Pricing API: http://localhost:${PORT}/api/pricing`);
-  console.log(`🧪 Testing API: http://localhost:${PORT}/api/testing`);
   console.log(`⚙️  Config API: http://localhost:${PORT}/api/config`);
   console.log(`👨‍💼 Admin API: http://localhost:${PORT}/api/admin`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);

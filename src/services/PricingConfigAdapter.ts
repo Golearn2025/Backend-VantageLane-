@@ -158,7 +158,13 @@ export class PricingConfigAdapter {
         }
       },
       
-      premiumServices: dbConfig.premium_services || {}
+      premiumServices: dbConfig.premium_services || {},
+      
+      // Pass through booking type settings from Supabase
+      hourly_settings: (dbConfig as any).hourly_settings || undefined,
+      daily_settings: (dbConfig as any).daily_settings || undefined,
+      return_settings: (dbConfig as any).return_settings || undefined,
+      fleet_settings: (dbConfig as any).fleet_settings || undefined
     };
   }
   
