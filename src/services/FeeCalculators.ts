@@ -296,7 +296,7 @@ export class FeeCalculators {
    */
   static applyMultipliers(breakdown: PricingBreakdownData, request: PricingRequestData, config: PricingConfig): void {
     const dateTime = new Date(request.dateTime);
-    const timePeriod = PricingHelpers.getTimePeriod(dateTime);
+    const timePeriod = PricingHelpers.getTimePeriod(dateTime, config.time_period_config);
     const multiplier = config.multipliers.time[timePeriod];
     
     if (multiplier !== 1.0) {

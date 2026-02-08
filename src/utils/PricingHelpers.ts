@@ -4,36 +4,44 @@
  */
 
 import { TimePeriod, Coordinates } from '../types/pricing.types';
-import { TIME_CONFIG } from '../config/pricing.config';
+
+// Default time period config (fallback if Supabase doesn't have it)
+const DEFAULT_TIME_CONFIG = {
+  peak_morning: { start: '07:00', end: '09:00', days: [1,2,3,4,5] },
+  peak_evening: { start: '17:00', end: '19:00', days: [1,2,3,4,5] },
+  night: { start: '22:00', end: '06:00', days: [0,1,2,3,4,5,6] },
+  weekend: { days: [0,6] }
+};
 
 export class PricingHelpers {
   
   /**
    * Determine time period based on date/time
    */
-  public static getTimePeriod(dateTime: Date): TimePeriod {
+  public static getTimePeriod(dateTime: Date, timePeriodConfig?: typeof DEFAULT_TIME_CONFIG): TimePeriod {
+    const config = timePeriodConfig || DEFAULT_TIME_CONFIG;
     const hour = dateTime.getUTCHours();
     const day = dateTime.getUTCDay(); // 0 = Sunday, 6 = Saturday
     const timeString = `${hour.toString().padStart(2, '0')}:00`;
 
     // Weekend check
-    if (TIME_CONFIG.weekend.days.includes(day)) {
+    if (config.weekend.days.includes(day)) {
       return TimePeriod.WEEKEND;
     }
 
     // Peak hours check
-    if (this.isInTimeRange(timeString, TIME_CONFIG.peakMorning) && 
-        TIME_CONFIG.peakMorning.days.includes(day)) {
+    if (this.isInTimeRange(timeString, config.peak_morning) && 
+        config.peak_morning.days.includes(day)) {
       return TimePeriod.PEAK_MORNING;
     }
 
-    if (this.isInTimeRange(timeString, TIME_CONFIG.peakEvening) && 
-        TIME_CONFIG.peakEvening.days.includes(day)) {
+    if (this.isInTimeRange(timeString, config.peak_evening) && 
+        config.peak_evening.days.includes(day)) {
       return TimePeriod.PEAK_EVENING;
     }
 
     // Night check
-    if (this.isInTimeRange(timeString, TIME_CONFIG.night)) {
+    if (this.isInTimeRange(timeString, config.night)) {
       return TimePeriod.NIGHT;
     }
 

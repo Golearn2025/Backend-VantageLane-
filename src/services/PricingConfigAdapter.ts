@@ -164,7 +164,8 @@ export class PricingConfigAdapter {
       hourly_settings: (dbConfig as any).hourly_settings || undefined,
       daily_settings: (dbConfig as any).daily_settings || undefined,
       return_settings: (dbConfig as any).return_settings || undefined,
-      fleet_settings: (dbConfig as any).fleet_settings || undefined
+      fleet_settings: (dbConfig as any).fleet_settings || undefined,
+      time_period_config: (dbConfig as any).time_period_config || undefined
     };
   }
   

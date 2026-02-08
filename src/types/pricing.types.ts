@@ -154,6 +154,12 @@ export interface PricingConfig {
     };
     premium_services_multiply?: boolean;
   };
+  time_period_config?: {
+    peak_morning: { start: string; end: string; days: number[] };
+    peak_evening: { start: string; end: string; days: number[] };
+    night: { start: string; end: string; days: number[] };
+    weekend: { days: number[] };
+  };
 }
 
 export interface PricingBreakdownData {
