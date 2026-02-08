@@ -60,7 +60,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/cache', cacheRoutes);
 
 // Root endpoint
-app.get('/', (req, res) => {
+app.get('/', (req: express.Request, res: express.Response) => {
   res.json({
     success: true,
     message: 'Vantage Lane Pricing Backend API',
@@ -75,7 +75,7 @@ app.get('/', (req, res) => {
 });
 
 // Health check endpoint
-app.get('/health', (req, res) => {
+app.get('/health', (req: express.Request, res: express.Response) => {
   res.status(200).json({
     success: true,
     status: 'healthy',
@@ -97,7 +97,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 });
 
 // 404 handler
-app.use('*', (req, res) => {
+app.use('*', (req: express.Request, res: express.Response) => {
   res.status(404).json({
     success: false,
     error: 'Endpoint not found',

@@ -16,16 +16,16 @@
     "dotenv": "^16.3.1",
     "express-rate-limit": "^7.1.5",
     "express-validator": "^7.0.1",
-    "@supabase/supabase-js": "^2.39.0"
-  },
-  "devDependencies": {
+    "@supabase/supabase-js": "^2.39.0",
     "typescript": "^5.2.2",
-    "ts-node": "^10.9.1",
-    "ts-node-dev": "^2.0.0",
     "@types/express": "^4.17.17",
     "@types/cors": "^2.8.13",
     "@types/node": "^20.5.0",
-    "@types/express-validator": "^3.0.0",
+    "@types/express-validator": "^3.0.0"
+  },
+  "devDependencies": {
+    "ts-node": "^10.9.1",
+    "ts-node-dev": "^2.0.0",
     "rimraf": "^5.0.1",
     "nodemon": "^3.0.1"
   },

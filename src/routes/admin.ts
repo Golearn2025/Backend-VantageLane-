@@ -206,7 +206,7 @@ const router = express.Router();
  * GET /api/admin/pricing/rules
  * Returns current pricing configuration for Admin Dashboard
  */
-router.get('/pricing/rules', (req, res) => {
+router.get('/pricing/rules', (req: express.Request, res: express.Response) => {
   try {
     // Return current pricing config in Admin-friendly format
     const adminConfig = {
@@ -422,7 +422,7 @@ router.get('/pricing/rules', (req, res) => {
  * POST /api/admin/pricing/update
  * Updates pricing configuration from Admin Dashboard
  */
-router.post('/pricing/update', async (req, res) => {
+router.post('/pricing/update', async (req: express.Request, res: express.Response) => {
   try {
     const { type, data } = req.body;
 
@@ -585,7 +585,7 @@ router.post('/pricing/update', async (req, res) => {
  * GET /api/admin/health
  * Health check for Admin Dashboard
  */
-router.get('/health', (req, res) => {
+router.get('/health', (req: express.Request, res: express.Response) => {
   res.json({
     success: true,
     service: 'Admin API',
@@ -599,7 +599,7 @@ router.get('/health', (req, res) => {
  * GET /api/admin/pricing/hourly-packages
  * Returns hourly packages for landing page consumption
  */
-router.get('/pricing/hourly-packages', (req, res) => {
+router.get('/pricing/hourly-packages', (req: express.Request, res: express.Response) => {
   try {
     const vehicleType = req.query.vehicle as string || 'executive';
     
