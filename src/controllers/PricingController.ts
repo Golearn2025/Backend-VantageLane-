@@ -29,7 +29,10 @@ export class PricingController {
       }
 
       const requestData: PricingRequestData = req.body;
-      const organizationId = req.body.organizationId || req.headers['x-organization-id'] as string;
+      const organizationId = req.body.organizationId || 
+                            req.headers['x-organization-id'] as string || 
+                            process.env.DEFAULT_ORGANIZATION_ID || 
+                            '9a5caade-4791-4860-93b5-12b1c4fa9830';
       
       // Calculate pricing
       const result = await PricingEngine.calculate(requestData);
@@ -83,7 +86,10 @@ export class PricingController {
       }
 
       const requestData: PricingRequestData = req.body;
-      const organizationId = req.body.organizationId || req.headers['x-organization-id'] as string;
+      const organizationId = req.body.organizationId || 
+                            req.headers['x-organization-id'] as string || 
+                            process.env.DEFAULT_ORGANIZATION_ID || 
+                            '9a5caade-4791-4860-93b5-12b1c4fa9830';
 
       // Get organization settings (commission rates, VAT)
       const settings = await OrganizationSettingsService.getOrganizationSettings(organizationId);
