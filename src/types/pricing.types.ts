@@ -7,7 +7,7 @@ export enum VehicleType {
   EXECUTIVE = 'executive',
   LUXURY = 'luxury',
   SUV = 'suv',
-  VAN = 'van'
+  VAN = 'mpv'
 }
 
 export enum BookingType {
