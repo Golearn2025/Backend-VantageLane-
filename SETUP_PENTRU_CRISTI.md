@@ -22,7 +22,7 @@ const BACKEND_URL = 'https://pricing.vantage-lane.com';
 
 ### Cheia Ta Google Maps
 ```javascript
-const GOOGLE_MAPS_API_KEY = 'AIzaSyBFVTh-xzPAPHuW2Qa-w9v_qjnZV-nNCbY';
+const GOOGLE_MAPS_API_KEY = 'YOUR_GOOGLE_MAPS_API_KEY_HERE';
 ```
 
 ### Ce Poate Face Această Cheie
@@ -43,7 +43,7 @@ Creează fișier `.env` în root-ul proiectului:
 
 ```env
 # .env
-VITE_GOOGLE_MAPS_API_KEY=AIzaSyBFVTh-xzPAPHuW2Qa-w9v_qjnZV-nNCbY
+VITE_GOOGLE_MAPS_API_KEY=YOUR_GOOGLE_MAPS_API_KEY_HERE
 VITE_BACKEND_URL=http://localhost:3000
 ```
 
@@ -58,7 +58,7 @@ Creează fișier `.env.local`:
 
 ```env
 # .env.local
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=AIzaSyBFVTh-xzPAPHuW2Qa-w9v_qjnZV-nNCbY
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=YOUR_GOOGLE_MAPS_API_KEY_HERE
 NEXT_PUBLIC_BACKEND_URL=http://localhost:3000
 ```
 
@@ -74,7 +74,7 @@ Creează fișier `config.js`:
 ```javascript
 // config.js
 const config = {
-  googleMapsApiKey: 'AIzaSyBFVTh-xzPAPHuW2Qa-w9v_qjnZV-nNCbY',
+  googleMapsApiKey: 'YOUR_GOOGLE_MAPS_API_KEY_HERE',
   backendUrl: window.location.hostname === 'localhost' 
     ? 'http://localhost:3000' 
     : 'https://pricing.vantage-lane.com'
@@ -91,7 +91,7 @@ export default config;
 
 ```javascript
 // Configuration
-const GOOGLE_MAPS_API_KEY = 'AIzaSyBFVTh-xzPAPHuW2Qa-w9v_qjnZV-nNCbY';
+const GOOGLE_MAPS_API_KEY = 'YOUR_GOOGLE_MAPS_API_KEY_HERE';
 
 // Auto-detect local vs production
 const BACKEND_URL = window.location.hostname === 'localhost' 
@@ -287,7 +287,7 @@ Sau folosește auto-detect (recomandare de mai sus).
 ### ❌ NU Face Asta:
 ```javascript
 // NU pune cheia direct în cod public pe GitHub!
-const API_KEY = 'AIzaSyBFVTh-xzPAPHuW2Qa-w9v_qjnZV-nNCbY';
+const API_KEY = 'YOUR_GOOGLE_MAPS_API_KEY_HERE';
 ```
 
 ### ✅ Fă Asta:
@@ -299,7 +299,7 @@ const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 ### Restricționează Cheia în Google Cloud Console:
 1. Mergi la [Google Cloud Console](https://console.cloud.google.com/)
 2. API & Services → Credentials
-3. Editează cheia `AIzaSyBFVTh-xzPAPHuW2Qa-w9v_qjnZV-nNCbY`
+3. Editează cheia `YOUR_GOOGLE_MAPS_API_KEY_HERE`
 4. **Application restrictions**: HTTP referrers
 5. Adaugă domeniul landing page-ului (ex: `https://vantagelane.com/*`)
 6. **API restrictions**: Selectează doar:
@@ -313,7 +313,7 @@ const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 ## 🎯 Checklist pentru Cristi
 
 ### Setup Inițial
-- [ ] Salvează cheia Google Maps: `AIzaSyBFVTh-xzPAPHuW2Qa-w9v_qjnZV-nNCbY`
+- [ ] Salvează cheia Google Maps: `YOUR_GOOGLE_MAPS_API_KEY_HERE`
 - [ ] Restricționează cheia în Google Cloud Console
 - [ ] Configurează environment variables în proiect
 - [ ] Testează cu backend local: `http://localhost:3000`
@@ -355,7 +355,7 @@ const API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
 ### Google Maps API Key
 ```
-AIzaSyBFVTh-xzPAPHuW2Qa-w9v_qjnZV-nNCbY
+YOUR_GOOGLE_MAPS_API_KEY_HERE
 ```
 
 ---
