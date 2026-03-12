@@ -4,22 +4,26 @@
  */
 
 import express, { Request, Response } from 'express';
-import { PricingConfigService } from '../services/PricingConfigService';
+import { PricingDataService } from '../services/PricingDataService';
+import { OrganizationSettingsService } from '../services/OrganizationSettingsService';
 
 const router = express.Router();
 
 /**
  * POST /api/cache/invalidate
- * Invalidate pricing config cache
+ * Invalidate pricing data cache
  * Called from Admin Panel after pricing updates
  */
 router.post('/invalidate', (req: Request, res: Response) => {
   try {
-    PricingConfigService.invalidateCache();
+    const { organizationId } = req.body;
+    
+    PricingDataService.invalidateCache();
+    OrganizationSettingsService.invalidateCache(organizationId);
     
     res.json({
       success: true,
-      message: 'Pricing config cache invalidated successfully',
+      message: 'Pricing data cache invalidated successfully',
       timestamp: new Date().toISOString()
     });
     
@@ -39,11 +43,13 @@ router.post('/invalidate', (req: Request, res: Response) => {
  */
 router.get('/status', (req: Request, res: Response) => {
   try {
-    const status = PricingConfigService.getCacheStatus();
+    const pricingStatus = PricingDataService.getCacheStatus();
     
     res.json({
       success: true,
-      data: status,
+      data: {
+        pricing_data: pricingStatus
+      },
       timestamp: new Date().toISOString()
     });
     

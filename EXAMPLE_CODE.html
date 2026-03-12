@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vantage Lane - Pricing Integration Example</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 40px;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2em;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 0.9em;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 600;
+        }
+        
+        input, select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        
+        input:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .result {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 12px;
+            display: none;
+        }
+        
+        .result.show {
+            display: block;
+        }
+        
+        .price {
+            font-size: 3em;
+            color: #667eea;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+        
+        .breakdown {
+            margin-top: 20px;
+        }
+        
+        .breakdown-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        
+        .breakdown-item:last-child {
+            border-bottom: none;
+            font-weight: bold;
+            font-size: 1.2em;
+        }
+        
+        .error {
+            background: #fee;
+            color: #c33;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            display: none;
+        }
+        
+        .error.show {
+            display: block;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+            display: none;
+        }
+        
+        .loading.show {
+            display: block;
+        }
+        
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .info-box {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #2196f3;
+        }
+        
+        .info-box strong {
+            color: #1976d2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚗 Vantage Lane Pricing</h1>
+        <p class="subtitle">Integration Example - Landing Page</p>
+        
+        <div class="info-box">
+            <strong>⚠️ Important:</strong> Replace <code>YOUR_GOOGLE_MAPS_API_KEY</code> in the code with your actual Google Maps API Key!
+        </div>
+        
+        <form id="pricingForm">
+            <div class="form-group">
+                <label for="pickup">Pickup Location</label>
+                <input type="text" id="pickup" placeholder="e.g., Heathrow Airport" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="dropoff">Dropoff Location</label>
+                <input type="text" id="dropoff" placeholder="e.g., Central London" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="vehicleType">Vehicle Type</label>
+                <select id="vehicleType" required>
+                    <option value="">Select vehicle...</option>
+                    <option value="executive">Executive Sedan</option>
+                    <option value="luxury">Luxury Sedan</option>
+                    <option value="suv">SUV</option>
+                    <option value="van">Van (6-8 passengers)</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="bookingType">Booking Type</label>
+                <select id="bookingType" required>
+                    <option value="">Select booking type...</option>
+                    <option value="one_way">One Way Trip</option>
+                    <option value="return">Return Trip (10% discount)</option>
+                    <option value="hourly">Hourly Booking</option>
+                    <option value="daily">Daily Booking</option>
+                </select>
+            </div>
+            
+            <div class="form-group" id="hoursGroup" style="display: none;">
+                <label for="hours">Number of Hours (3-12)</label>
+                <input type="number" id="hours" min="3" max="12" placeholder="e.g., 4">
+            </div>
+            
+            <div class="form-group" id="daysGroup" style="display: none;">
+                <label for="days">Number of Days (1-30)</label>
+                <input type="number" id="days" min="1" max="30" placeholder="e.g., 3">
+            </div>
+            
+            <div class="form-group">
+                <label for="dateTime">Date & Time</label>
+                <input type="datetime-local" id="dateTime" required>
+            </div>
+            
+            <button type="submit" class="btn" id="submitBtn">Calculate Price</button>
+        </form>
+        
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p style="margin-top: 10px;">Calculating price...</p>
+        </div>
+        
+        <div class="error" id="error"></div>
+        
+        <div class="result" id="result">
+            <h2>💰 Your Quote</h2>
+            <div class="price" id="finalPrice">£0.00</div>
+            
+            <div class="breakdown">
+                <h3>Price Breakdown</h3>
+                <div id="breakdownItems"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ⚠️ REPLACE THIS WITH YOUR GOOGLE MAPS API KEY
+        const GOOGLE_MAPS_API_KEY = 'YOUR_GOOGLE_MAPS_API_KEY';
+        const BACKEND_URL = 'https://pricing.vantage-lane.com';
+
+        // Show/hide hours/days fields based on booking type
+        document.getElementById('bookingType').addEventListener('change', function() {
+            const bookingType = this.value;
+            document.getElementById('hoursGroup').style.display = bookingType === 'hourly' ? 'block' : 'none';
+            document.getElementById('daysGroup').style.display = bookingType === 'daily' ? 'block' : 'none';
+        });
+
+        // Set default date/time to now
+        const now = new Date();
+        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+        document.getElementById('dateTime').value = now.toISOString().slice(0, 16);
+
+        // Main form submission
+        document.getElementById('pricingForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            // Hide previous results
+            document.getElementById('result').classList.remove('show');
+            document.getElementById('error').classList.remove('show');
+            document.getElementById('loading').classList.add('show');
+            document.getElementById('submitBtn').disabled = true;
+
+            try {
+                // Get form values
+                const pickup = document.getElementById('pickup').value;
+                const dropoff = document.getElementById('dropoff').value;
+                const vehicleType = document.getElementById('vehicleType').value;
+                const bookingType = document.getElementById('bookingType').value;
+                const dateTime = new Date(document.getElementById('dateTime').value).toISOString();
+                const hours = document.getElementById('hours').value;
+                const days = document.getElementById('days').value;
+
+                // STEP 1: Get distance and duration from Google Maps
+                const routeData = await getDistanceAndDuration(pickup, dropoff);
+
+                // STEP 2: Build request body
+                const requestBody = {
+                    pickup,
+                    dropoff,
+                    vehicleType,
+                    bookingType,
+                    dateTime,
+                    distance: routeData.distance,
+                    duration: routeData.duration,
+                    coordinates: {
+                        pickup: routeData.pickup_coords,
+                        dropoff: routeData.dropoff_coords
+                    }
+                };
+
+                // Add hours/days if needed
+                if (bookingType === 'hourly' && hours) {
+                    requestBody.hours = parseInt(hours);
+                }
+                if (bookingType === 'daily' && days) {
+                    requestBody.days = parseInt(days);
+                }
+
+                // STEP 3: Call backend pricing API
+                const response = await fetch(`${BACKEND_URL}/api/pricing/calculate`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+
+                const data = await response.json();
+
+                // STEP 4: Display results
+                if (data.success) {
+                    displayResults(data);
+                } else {
+                    showError(data.error || 'Failed to calculate price');
+                }
+
+            } catch (error) {
+                console.error('Error:', error);
+                showError(error.message);
+            } finally {
+                document.getElementById('loading').classList.remove('show');
+                document.getElementById('submitBtn').disabled = false;
+            }
+        });
+
+        // Get distance and duration from Google Maps
+        async function getDistanceAndDuration(pickup, dropoff) {
+            const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${encodeURIComponent(pickup)}&destination=${encodeURIComponent(dropoff)}&key=${GOOGLE_MAPS_API_KEY}`;
+            
+            // Note: For production, you should use a backend proxy to call Google Maps API
+            // to avoid exposing your API key. This is just for demonstration.
+            
+            const response = await fetch(url);
+            const data = await response.json();
+            
+            if (data.status === 'OK') {
+                const route = data.routes[0].legs[0];
+                return {
+                    distance: route.distance.value / 1609.34, // meters to miles
+                    duration: route.duration.value / 60, // seconds to minutes
+                    pickup_coords: {
+                        lat: route.start_location.lat,
+                        lng: route.start_location.lng
+                    },
+                    dropoff_coords: {
+                        lat: route.end_location.lat,
+                        lng: route.end_location.lng
+                    }
+                };
+            } else {
+                throw new Error('Could not find route: ' + data.status);
+            }
+        }
+
+        // Display pricing results
+        function displayResults(data) {
+            document.getElementById('finalPrice').textContent = `£${data.finalPrice.toFixed(2)}`;
+            
+            const breakdownItems = document.getElementById('breakdownItems');
+            breakdownItems.innerHTML = '';
+            
+            if (data.breakdown) {
+                const items = [
+                    { label: 'Base Fare', value: data.breakdown.baseFare },
+                    { label: 'Distance Fee', value: data.breakdown.distanceFee },
+                    { label: 'Time Fee', value: data.breakdown.timeFee },
+                    { label: 'Additional Fees', value: data.breakdown.additionalFees },
+                    { label: 'Services', value: data.breakdown.services },
+                    { label: 'Subtotal', value: data.breakdown.subtotal },
+                ];
+                
+                // Add multipliers
+                if (data.breakdown.multipliers) {
+                    for (const [key, value] of Object.entries(data.breakdown.multipliers)) {
+                        items.push({
+                            label: `${key.replace('_', ' ')} (${((value - 1) * 100).toFixed(0)}%)`,
+                            value: data.breakdown.subtotal * (value - 1)
+                        });
+                    }
+                }
+                
+                // Add discounts
+                if (data.breakdown.discounts > 0) {
+                    items.push({ label: 'Discounts', value: -data.breakdown.discounts });
+                }
+                
+                items.push({ label: 'Final Price', value: data.breakdown.finalPrice });
+                
+                items.forEach(item => {
+                    const div = document.createElement('div');
+                    div.className = 'breakdown-item';
+                    div.innerHTML = `
+                        <span>${item.label}</span>
+                        <span>£${item.value.toFixed(2)}</span>
+                    `;
+                    breakdownItems.appendChild(div);
+                });
+            }
+            
+            document.getElementById('result').classList.add('show');
+        }
+
+        // Show error message
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = '❌ Error: ' + message;
+            errorDiv.classList.add('show');
+        }
+    </script>
+</body>
+</html>

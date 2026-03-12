@@ -48,6 +48,7 @@ export interface PricingRequestData {
   extras?: string[];
   corporateTier?: string;
   fleetConfig?: Record<string, number>; // For fleet bookings
+  organizationId?: string; // Multi-tenant organization ID
 }
 
 export interface VehicleRates {
@@ -232,6 +233,7 @@ export interface PricingResult {
   success: boolean;
   finalPrice?: number;
   currency?: string;
+  pricing_version_id?: string; // UUID of pricing version used
   breakdown?: {
     baseFare: number;
     distanceFee: number;

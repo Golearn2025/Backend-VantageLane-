@@ -15,7 +15,7 @@ config();
 // Import routes
 import pricingRoutes from './routes/pricing';
 import configRoutes from './routes/config';
-import adminRoutes from './routes/admin';
+import bookingRoutes from './routes/booking';
 import cacheRoutes from './routes/cache.routes';
 
 const app = express();
@@ -56,7 +56,7 @@ app.use(express.urlencoded({ extended: true }));
 // API Routes
 app.use('/api/pricing', pricingRoutes);
 app.use('/api/config', configRoutes);
-app.use('/api/admin', adminRoutes);
+app.use('/api/booking', bookingRoutes);
 app.use('/api/cache', cacheRoutes);
 
 // Root endpoint
@@ -68,7 +68,8 @@ app.get('/', (req: express.Request, res: express.Response) => {
     endpoints: {
       pricing: '/api/pricing',
       config: '/api/config',
-      admin: '/api/admin'
+      booking: '/api/booking',
+      cache: '/api/cache'
     },
     timestamp: new Date().toISOString()
   });
@@ -112,7 +113,8 @@ app.listen(PORT, () => {
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`💰 Pricing API: http://localhost:${PORT}/api/pricing`);
   console.log(`⚙️  Config API: http://localhost:${PORT}/api/config`);
-  console.log(`👨‍💼 Admin API: http://localhost:${PORT}/api/admin`);
+  console.log(`📋 Booking API: http://localhost:${PORT}/api/booking`);
+  console.log(`� Cache API: http://localhost:${PORT}/api/cache`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 

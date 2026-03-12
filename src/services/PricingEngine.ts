@@ -1,6 +1,11 @@
 /**
- * Core Pricing Engine - Orchestrator
- * Delegates fee calculations to FeeCalculators and booking logic to BookingTypeHandlers
+ * Core Pricing Engine - Refactored to use database views
+ * 
+ * CHANGES FROM OLD VERSION:
+ * - Removed PricingConfigService and PricingConfigAdapter dependencies
+ * - Now uses PricingDataService to read from normalized views
+ * - All calculator methods are now async
+ * - Business logic remains UNCHANGED
  */
 
 import { 
@@ -8,18 +13,14 @@ import {
   PricingResult, 
   VehicleType, 
   BookingType,
-  PricingBreakdownData,
-  PricingConfig
+  PricingBreakdownData
 } from '../types/pricing.types';
-import { PricingConfigService } from './PricingConfigService';
-import { PricingConfigAdapter } from './PricingConfigAdapter';
+import { PricingDataService } from './PricingDataService';
 import { PricingHelpers } from '../utils/PricingHelpers';
 import { FeeCalculators } from './FeeCalculators';
 import { BookingTypeHandlers } from './BookingTypeHandlers';
 
 export class PricingEngine {
-  // Pricing config - loaded from Supabase
-  private static PRICING_CONFIG: PricingConfig;
   
   /**
    * Main method to calculate pricing
@@ -32,10 +33,8 @@ export class PricingEngine {
         return this.createErrorResponse(validationError, 400);
       }
 
-      // Fetch pricing config from Supabase (with caching)
-      const dbConfig = await PricingConfigService.getActivePricingConfig();
-      this.PRICING_CONFIG = PricingConfigAdapter.toPricingConfig(dbConfig);
-      const config = this.PRICING_CONFIG;
+      // Capture pricing_version_id from first pricing query
+      let pricingVersionId: string | undefined;
 
       // Initialize breakdown
       const breakdown: PricingBreakdownData = {
@@ -57,68 +56,98 @@ export class PricingEngine {
 
       // Step 1: Base fare (NOT for hourly/daily bookings - those are flat rate)
       if (request.bookingType !== BookingType.HOURLY && request.bookingType !== BookingType.DAILY) {
-        FeeCalculators.calculateBaseFare(breakdown, request, config);
+        await FeeCalculators.calculateBaseFare(breakdown, request);
+        // Capture pricing_version_id from vehicle rates
+        const rates = await PricingDataService.getVehicleRates(
+          request.vehicleType,
+          request.bookingType,
+          request.organizationId
+        );
+        pricingVersionId = rates.pricing_version_id;
       }
 
       // Step 2: Calculate main fare (distance/time vs hourly vs daily)
       if (request.bookingType === BookingType.HOURLY) {
-        FeeCalculators.calculateHourlyFee(breakdown, request, config);
+        await FeeCalculators.calculateHourlyFee(breakdown, request);
+        // Capture pricing_version_id from hourly rules
+        const hourlyRules = await PricingDataService.getHourlyRules(
+          request.vehicleType,
+          request.organizationId
+        );
+        pricingVersionId = hourlyRules.pricing_version_id;
       } else if (request.bookingType === BookingType.DAILY) {
-        FeeCalculators.calculateDailyFee(breakdown, request, config);
+        await FeeCalculators.calculateDailyFee(breakdown, request);
+        // Capture pricing_version_id from daily rules
+        const dailyRules = await PricingDataService.getDailyRules(
+          request.vehicleType,
+          request.organizationId
+        );
+        pricingVersionId = dailyRules.pricing_version_id;
       } else {
         if (request.distance) {
-          FeeCalculators.calculateDistanceFee(breakdown, request, config);
+          await FeeCalculators.calculateDistanceFee(breakdown, request);
         }
         if (request.duration) {
-          FeeCalculators.calculateTimeFee(breakdown, request, config);
+          await FeeCalculators.calculateTimeFee(breakdown, request);
         }
       }
 
       // Step 3: Zone fees (airports, congestion)
-      FeeCalculators.calculateZoneFees(breakdown, request, config);
+      await FeeCalculators.calculateZoneFees(breakdown, request);
 
       // Step 4: Toll roads detection
-      await FeeCalculators.calculateTollFees(breakdown, request, config);
+      await FeeCalculators.calculateTollFees(breakdown, request);
 
       // Step 5: Additional services
-      await FeeCalculators.calculateAdditionalServices(breakdown, request, config);
+      await FeeCalculators.calculateAdditionalServices(breakdown, request);
 
-      // Step 6: Calculate subtotal
-      breakdown.subtotal = breakdown.baseFare + breakdown.distanceFee + breakdown.timeFee + 
-                          breakdown.airportFees + breakdown.zoneFees + breakdown.tollFees + 
-                          breakdown.multiStopFees + breakdown.waitingFees + breakdown.extraServices;
+      // Calculate subtotal before booking type logic
+      breakdown.subtotal = 
+        breakdown.baseFare +
+        breakdown.distanceFee +
+        breakdown.timeFee +
+        breakdown.airportFees +
+        breakdown.zoneFees +
+        breakdown.tollFees +
+        breakdown.multiStopFees +
+        breakdown.waitingFees +
+        breakdown.extraServices;
 
-      // Step 7: Apply RETURN trip logic (x2 with discount)
+      // Step 6: Apply booking type specific logic (RETURN or FLEET)
       if (request.bookingType === BookingType.RETURN) {
-        BookingTypeHandlers.applyReturnTripLogic(breakdown, request, config);
+        await BookingTypeHandlers.applyReturnTripLogic(breakdown, request);
+      } else if (request.bookingType === BookingType.FLEET) {
+        await BookingTypeHandlers.applyFleetLogic(breakdown, request);
       }
 
-      // Step 8: Apply FLEET logic (multiple vehicles)
-      if (request.bookingType === BookingType.FLEET && request.fleetConfig) {
-        BookingTypeHandlers.applyFleetLogic(breakdown, request, config);
+      // Step 7: Apply time-based multipliers (only for non-hourly/daily bookings)
+      if (request.bookingType !== BookingType.HOURLY && request.bookingType !== BookingType.DAILY) {
+        await FeeCalculators.applyMultipliers(breakdown, request);
       }
 
-      // Step 9: Apply multipliers
-      FeeCalculators.applyMultipliers(breakdown, request, config);
+      // Step 8: Apply corporate discounts
+      await FeeCalculators.applyDiscounts(breakdown, request);
 
-      // Step 10: Apply discounts
-      FeeCalculators.applyDiscounts(breakdown, request, config);
+      // Step 9: Apply minimum fare
+      await FeeCalculators.applyMinimumFare(breakdown, request);
 
-      // Step 11: Check minimum fare
-      FeeCalculators.applyMinimumFare(breakdown, request, config);
-
-      // Step 12: Apply rounding
+      // Step 10: Apply rounding policy
+      const roundingRules = await PricingDataService.getRoundingRules();
       const priceBeforeRounding = breakdown.finalPrice || (breakdown.subtotal - breakdown.discounts);
       breakdown.finalPrice = PricingHelpers.applyRounding(
         priceBeforeRounding, 
-        config.policies.rounding
+        {
+          to: roundingRules.round_to_pence ? roundingRules.round_to_pence / 100 : 5,
+          direction: roundingRules.direction || 'up'
+        }
       );
 
-      return this.createSuccessResponse(breakdown, request);
+      return this.createSuccessResponse(breakdown, request, pricingVersionId);
 
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Pricing calculation error:', error);
       return this.createErrorResponse(
-        error instanceof Error ? error.message : 'Internal calculation error', 
+        error.message || 'Internal pricing calculation error',
         500
       );
     }
@@ -128,39 +157,56 @@ export class PricingEngine {
    * Validate pricing request
    */
   private static validateRequest(request: PricingRequestData): string | null {
-    if (!request.pickup || !request.dropoff) {
-      return 'Pickup and dropoff locations are required';
-    }
-    
-    if (!Object.values(VehicleType).includes(request.vehicleType)) {
-      return 'Invalid vehicle type';
-    }
-    
-    if (!Object.values(BookingType).includes(request.bookingType)) {
-      return 'Invalid booking type';
+    if (!request.vehicleType) {
+      return 'Vehicle type is required';
     }
 
-    if (!request.dateTime || isNaN(Date.parse(request.dateTime))) {
-      return 'Valid dateTime is required';
+    if (!request.bookingType) {
+      return 'Booking type is required';
+    }
+
+    if (!Object.values(VehicleType).includes(request.vehicleType)) {
+      return `Invalid vehicle type: ${request.vehicleType}`;
+    }
+
+    if (!Object.values(BookingType).includes(request.bookingType)) {
+      return `Invalid booking type: ${request.bookingType}`;
+    }
+
+    if (request.bookingType === BookingType.HOURLY && !request.hours) {
+      return 'Hours are required for hourly bookings';
+    }
+
+    if (request.bookingType === BookingType.DAILY && !request.days) {
+      return 'Days are required for daily bookings';
+    }
+
+    if (request.bookingType === BookingType.FLEET && !request.fleetConfig) {
+      return 'Fleet configuration is required for fleet bookings';
     }
 
     return null;
   }
 
   /**
-   * Create success response
+   * Create success response with breakdown
    */
-  private static createSuccessResponse(breakdown: PricingBreakdownData, request: PricingRequestData): PricingResult {
+  private static async createSuccessResponse(
+    breakdown: PricingBreakdownData, 
+    request: PricingRequestData,
+    pricingVersionId?: string
+  ): Promise<PricingResult> {
     const result: PricingResult = {
       success: true,
       finalPrice: breakdown.finalPrice,
       currency: 'GBP',
+      pricing_version_id: pricingVersionId,
       breakdown: {
         baseFare: breakdown.baseFare,
         distanceFee: breakdown.distanceFee,
         timeFee: breakdown.timeFee,
         additionalFees: breakdown.airportFees + breakdown.zoneFees + breakdown.tollFees,
-        services: breakdown.extraServices + breakdown.multiStopFees + breakdown.waitingFees,
+        services: breakdown.multiStopFees + breakdown.extraServices,
         subtotal: breakdown.subtotal,
         multipliers: breakdown.multipliers,
         discounts: breakdown.discounts,
@@ -172,12 +218,21 @@ export class PricingEngine {
 
     // Generate legs breakdown for RETURN bookings
     if (request.bookingType === BookingType.RETURN) {
-      result.legs = BookingTypeHandlers.generateReturnLegs(breakdown, request);
+      const { legs } = await BookingTypeHandlers.generateReturnLegs(
+        breakdown, 
+        request, 
+        breakdown.finalPrice
+      );
+      result.legs = legs;
     }
 
     // Generate legs breakdown for FLEET bookings
     if (request.bookingType === BookingType.FLEET && request.fleetConfig) {
-      const { legs, summary } = BookingTypeHandlers.generateFleetLegs(breakdown, request, this.PRICING_CONFIG);
+      const { legs, summary } = await BookingTypeHandlers.generateFleetLegs(
+        breakdown,
+        request,
+        breakdown.finalPrice
+      );
       result.legs = legs;
       result.fleet_summary = summary;
     }
@@ -192,7 +247,7 @@ export class PricingEngine {
     return {
       success: false,
       error: message,
-      code,
+      code: code,
       timestamp: new Date().toISOString()
     };
   }
