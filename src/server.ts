@@ -20,6 +20,7 @@ import pricingRoutes from './routes/pricing';
 import configRoutes from './routes/config';
 import bookingRoutes from './routes/booking';
 import cacheRoutes from './routes/cache.routes';
+import stripeRoutes from './routes/stripe';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -52,7 +53,10 @@ const limiter = rateLimit({
 
 app.use('/api/', limiter);
 
-// Body parsing middleware
+// Stripe webhook needs raw body for signature verification (MUST be before JSON parsing)
+app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }));
+
+// Body parsing middleware (EXCEPT for Stripe webhooks)
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -65,6 +69,7 @@ app.use('/api/pricing', pricingRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/booking', bookingRoutes);
 app.use('/api/cache', cacheRoutes);
+app.use('/api/stripe', stripeRoutes);
 
 // Root endpoint
 app.get('/', (req: express.Request, res: express.Response) => {
@@ -76,7 +81,8 @@ app.get('/', (req: express.Request, res: express.Response) => {
       pricing: '/api/pricing',
       config: '/api/config',
       booking: '/api/booking',
-      cache: '/api/cache'
+      cache: '/api/cache',
+      stripe: '/api/stripe'
     },
     timestamp: new Date().toISOString()
   });
