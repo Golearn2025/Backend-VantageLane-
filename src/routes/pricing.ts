@@ -8,6 +8,7 @@ import { PricingController } from '../controllers/PricingController';
 import { VehicleType, BookingType } from '../types/pricing.types';
 import { calculateAndQuote } from '../api/pricing/calculate-and-quote';
 import { convertQuoteToBooking } from '../api/pricing/convert-quote-to-booking';
+import createPaymentIntent from '../api/pricing/create-payment-intent';
 
 const router = Router();
 
@@ -45,6 +46,15 @@ const convertQuoteToBookingValidation = [
   body('bookingData.preferences').optional().isObject().withMessage('preferences must be object')
 ];
 
+// Wave 1 validation for payment intent creation
+const createPaymentIntentValidation = [
+  body('bookingId').isUUID().withMessage('Valid bookingId is required'),
+  body('quoteId').isUUID().withMessage('Valid quoteId is required'),
+  body('customerData.customerId').isUUID().withMessage('Valid customerId is required'),
+  body('customerData.email').isEmail().withMessage('Valid email is required'),
+  body('idempotencyKey').optional().isString().withMessage('Idempotency key must be string')
+];
+
 /**
  * @route POST /api/pricing/calculate
  * @desc Calculate price with provided distance/duration
@@ -72,6 +82,13 @@ router.post('/calculate-and-quote', calculateAndQuoteValidation, calculateAndQuo
  * @access Public
  */
 router.post('/convert-quote-to-booking', convertQuoteToBookingValidation, convertQuoteToBooking);
+
+/**
+ * @route POST /api/pricing/create-payment-intent
+ * @desc Wave 1: Create payment intent for existing booking
+ * @access Public
+ */
+router.post('/create-payment-intent', createPaymentIntentValidation, createPaymentIntent);
 
 /**
  * @route GET /api/pricing/health
