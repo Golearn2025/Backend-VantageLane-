@@ -87,7 +87,7 @@ export class QuoteService {
           services_subtotal_pence: servicesSubtotalPence,
           services_discount_pence: servicesDiscountPence,
 
-          // Line items as JSONB
+          // Line items as JSONB with Phase 2A trip metadata
           line_items: {
             components: [
               { code: 'base_fare', label: 'Base fare', amount_pence: Math.round((pricingResult.breakdown?.baseFare || 0) * 100) },
@@ -109,6 +109,24 @@ export class QuoteService {
               discount_pence: discountPence,
               vat_pence: vatPence,
               total_pence: totalPence
+            },
+            // Phase 2A: Persist trip metadata for safe quote -> booking conversion
+            meta: {
+              calc_source: 'pricing_engine_v2',
+              calc_version: '2.0.0',
+              trip: {
+                pickup: requestData.pickup,
+                dropoff: requestData.dropoff,
+                dateTime: requestData.dateTime,
+                bookingType: requestData.bookingType,
+                vehicleType: requestData.vehicleType,
+                distance: requestData.distance ?? null,
+                duration: requestData.duration ?? null,
+                coordinates: requestData.coordinates ?? null,
+                hours: requestData.hours ?? null,
+                days: requestData.days ?? null,
+                extras: requestData.extras ?? []
+              }
             }
           },
 
@@ -413,6 +431,252 @@ export class QuoteService {
     }
 
     return data;
+  }
+
+  /**
+   * Phase 2B: Convert independent quote to booking (ATOMIC via RPC)
+   *
+   * DESIGN NOTES:
+   * - Converts Phase 2A independent quote (booking_id = NULL) to real booking
+   * - Uses atomic RPC function for guaranteed consistency
+   * - All operations succeed or fail together
+   * - Enforces tenant ownership with organizationId validation
+   *
+   * IMPORTANT:
+   * - This fixes invented-data issues by reading only real persisted Phase 2A metadata
+   * - This flow is now ATOMIC via PostgreSQL RPC
+   */
+  static async convertQuoteToBooking(
+    quoteId: string,
+    organizationId: string,
+    customerData: {
+      customerId: string;
+      firstName?: string;
+      lastName?: string;
+      email?: string;
+      phone?: string;
+    },
+    bookingData?: {
+      passengerCount?: number;
+      bagCount?: number;
+      notes?: string;
+      preferences?: Record<string, any>;
+    }
+  ): Promise<{
+    success: boolean;
+    bookingId?: string;
+    quoteId?: string;
+    error?: string;
+  }> {
+    try {
+      console.log('🎯 Phase 2B: Converting quote to booking (ATOMIC):', quoteId);
+
+      // Call atomic RPC function
+      const { data, error } = await supabase.rpc('convert_quote_to_booking_atomic', {
+        p_quote_id: quoteId,
+        p_organization_id: organizationId,
+        p_customer_id: customerData.customerId,
+        p_passenger_count: bookingData?.passengerCount || 1,
+        p_bag_count: bookingData?.bagCount || 0,
+        p_notes_internal: bookingData?.notes || ''
+      });
+
+      if (error) {
+        console.error('❌ Phase 2B RPC error:', error);
+        return {
+          success: false,
+          error: error.message,
+          quoteId
+        };
+      }
+
+      if (!data) {
+        return {
+          success: false,
+          error: 'RPC returned no data',
+          quoteId
+        };
+      }
+
+      // Parse JSONB result
+      const result = typeof data === 'object' ? data : JSON.parse(data);
+
+      if (!result.success) {
+        return {
+          success: false,
+          error: result.error_message || 'Unknown RPC error',
+          quoteId
+        };
+      }
+
+      console.log('✅ Phase 2B: Quote successfully converted to booking (ATOMIC)');
+      console.log(`  Quote ID: ${quoteId} → Booking ID: ${result.booking_id}`);
+
+      return {
+        success: true,
+        bookingId: result.booking_id,
+        quoteId: result.quote_id
+      };
+    } catch (error: any) {
+      console.error('❌ Phase 2B: Error converting quote to booking:', error);
+
+      return {
+        success: false,
+        error: error.message,
+        quoteId
+      };
+    }
+  }
+
+  /**
+   * Extract trip configuration from real quote metadata
+   *
+   * CRITICAL:
+   * - Reads ONLY from persisted Phase 2A metadata
+   * - NO invented data
+   * - NO placeholders
+   * - NO fallback defaults
+   */
+  private static extractTripConfigurationFromQuote(quote: any): {
+    bookingType: string;
+    scheduledAt: string;
+    pickup: string;
+    dropoff: string;
+    distance: number | null;
+    duration: number | null;
+    vehicleCategory: string;
+    coordinates: any;
+    hours: number | null;
+    days: number | null;
+    extras: any[];
+  } {
+    const trip = quote?.line_items?.meta?.trip;
+
+    if (
+      !trip?.pickup ||
+      !trip?.dropoff ||
+      !trip?.dateTime ||
+      !trip?.bookingType ||
+      !trip?.vehicleType
+    ) {
+      throw new Error(
+        'Quote missing required trip metadata for conversion. Required: pickup, dropoff, dateTime, bookingType, vehicleType'
+      );
+    }
+
+    // Map booking type from frontend enum to DB enum
+    const bookingTypeMapping: Record<string, string> = {
+      'one_way': 'oneway',
+      'return': 'return',
+      'hourly': 'hourly',
+      'daily': 'daily',
+      'fleet': 'fleet'
+    };
+
+    const dbBookingType = bookingTypeMapping[trip.bookingType] || trip.bookingType;
+
+    return {
+      bookingType: dbBookingType,             // MAPPED to DB enum
+      scheduledAt: trip.dateTime,              // REAL DATA from Phase 2A
+      pickup: trip.pickup,                    // REAL DATA from Phase 2A
+      dropoff: trip.dropoff,                  // REAL DATA from Phase 2A
+      distance: trip.distance ?? null,        // REAL DATA from Phase 2A
+      duration: trip.duration ?? null,        // REAL DATA from Phase 2A
+      vehicleCategory: trip.vehicleType,      // REAL DATA from Phase 2A
+      coordinates: trip.coordinates ?? null,   // REAL DATA from Phase 2A
+      hours: trip.hours ?? null,             // REAL DATA from Phase 2A
+      days: trip.days ?? null,               // REAL DATA from Phase 2A
+      extras: trip.extras ?? []              // REAL DATA from Phase 2A
+    };
+  }
+
+  /**
+   * Create booking legs and associated leg quotes
+   */
+  private static async createBookingLegs(
+    bookingId: string,
+    tripConfig: {
+      bookingType: string;
+      scheduledAt: string;
+      pickup: string;
+      dropoff: string;
+      distance: number | null;
+      duration: number | null;
+      vehicleCategory: string;
+      coordinates: any;
+      hours: number | null;
+      days: number | null;
+      extras: any[];
+    },
+    quote: any
+  ): Promise<{
+    success: boolean;
+    legIds?: string[];
+    error?: string;
+  }> {
+    try {
+      // Phase 2B scope: single main leg only
+      const { data: bookingLeg, error: legError } = await supabase
+        .from('booking_legs')
+        .insert({
+          booking_id: bookingId,
+          leg_number: 1,
+          leg_kind: 'main',
+          status: 'PENDING',
+          pickup_address: tripConfig.pickup,
+          dropoff_address: tripConfig.dropoff,
+          scheduled_at: tripConfig.scheduledAt,
+          vehicle_category_id: tripConfig.vehicleCategory,
+          distance_miles: tripConfig.distance,
+          duration_min: tripConfig.duration,
+          organization_id: quote.organization_id
+        })
+        .select('id')
+        .single();
+
+      if (legError || !bookingLeg) {
+        return {
+          success: false,
+          error: legError?.message || 'Failed to create booking leg'
+        };
+      }
+
+      const { error: legQuoteError } = await supabase
+        .from('client_leg_quotes')
+        .insert({
+          booking_leg_id: bookingLeg.id,
+          booking_id: bookingId,
+          version: 1,
+          is_locked: false,
+          currency: quote.currency,
+          subtotal_pence: quote.subtotal_pence,
+          discount_pence: quote.discount_pence,
+          vat_rate: quote.vat_rate,
+          vat_pence: quote.vat_pence,
+          total_pence: quote.total_pence,
+          line_items: quote.line_items,
+          calc_source: 'pricing_engine_v2',
+          calc_version: '2.0.0',
+          organization_id: quote.organization_id
+        });
+
+      if (legQuoteError) {
+        return {
+          success: false,
+          error: legQuoteError.message || 'Failed to create client leg quote'
+        };
+      }
+
+      return {
+        success: true,
+        legIds: [bookingLeg.id]
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message
+      };
+    }
   }
 
   /**

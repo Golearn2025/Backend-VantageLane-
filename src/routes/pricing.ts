@@ -7,6 +7,7 @@ import { body } from 'express-validator';
 import { PricingController } from '../controllers/PricingController';
 import { VehicleType, BookingType } from '../types/pricing.types';
 import { calculateAndQuote } from '../api/pricing/calculate-and-quote';
+import { convertQuoteToBooking } from '../api/pricing/convert-quote-to-booking';
 
 const router = Router();
 
@@ -30,6 +31,20 @@ const calculateAndQuoteValidation = [
   ...pricingValidation
 ];
 
+// Phase 2B validation for quote to booking conversion
+const convertQuoteToBookingValidation = [
+  body('quoteId').isUUID().withMessage('Valid quoteId is required'),
+  body('customerData.customerId').isUUID().withMessage('Valid customerId is required'),
+  body('customerData.firstName').optional().isString().withMessage('firstName must be string'),
+  body('customerData.lastName').optional().isString().withMessage('lastName must be string'),
+  body('customerData.email').optional().isEmail().withMessage('Valid email is required'),
+  body('customerData.phone').optional().isString().withMessage('phone must be string'),
+  body('bookingData.passengerCount').optional().isInt({ min: 1, max: 8 }).withMessage('passengerCount must be between 1 and 8'),
+  body('bookingData.bagCount').optional().isInt({ min: 0, max: 10 }).withMessage('bagCount must be between 0 and 10'),
+  body('bookingData.notes').optional().isString().withMessage('notes must be string'),
+  body('bookingData.preferences').optional().isObject().withMessage('preferences must be object')
+];
+
 /**
  * @route POST /api/pricing/calculate
  * @desc Calculate price with provided distance/duration
@@ -50,6 +65,13 @@ router.post('/calculate-with-commissions', pricingValidation, PricingController.
  * @access Public
  */
 router.post('/calculate-and-quote', calculateAndQuoteValidation, calculateAndQuote);
+
+/**
+ * @route POST /api/pricing/convert-quote-to-booking
+ * @desc Phase 2B: Convert independent quote to real booking
+ * @access Public
+ */
+router.post('/convert-quote-to-booking', convertQuoteToBookingValidation, convertQuoteToBooking);
 
 /**
  * @route GET /api/pricing/health
