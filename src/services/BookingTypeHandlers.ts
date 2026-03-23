@@ -19,22 +19,22 @@ import { FeeCalculators } from './FeeCalculators';
 import { PricingDataService } from './PricingDataService';
 
 export class BookingTypeHandlers {
-  
+
   /**
    * Apply RETURN trip logic: (subtotal × 2) - discount
    * Reads from: v_active_pricing_version (return_discount_rate)
    */
   static async applyReturnTripLogic(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
     const returnSettings = await PricingDataService.getReturnSettings();
-    
+
     // Double the subtotal for round trip
     breakdown.subtotal = breakdown.subtotal * 2;
-    
+
     // Apply return discount
     const discountAmount = breakdown.subtotal * returnSettings.discount_rate;
     breakdown.discounts += discountAmount;
     breakdown.subtotal -= discountAmount;
-    
+
     breakdown.details.push({
       component: 'return_discount',
       amount: -discountAmount,
@@ -50,26 +50,26 @@ export class BookingTypeHandlers {
     if (!request.fleetConfig) return;
 
     const fleetSettings = await PricingDataService.getFleetSettings();
-    
+
     // Calculate total number of vehicles
     const totalVehicles = Object.values(request.fleetConfig).reduce((sum, count) => sum + count, 0);
-    
+
     let fleetSubtotal = 0;
     const vehicleBreakdowns: any[] = [];
-    
+
     // Calculate price for each vehicle type
     for (const [vehicleType, count] of Object.entries(request.fleetConfig)) {
       if (count === 0) continue;
-      
+
       const vType = vehicleType as VehicleType;
       const rates = await PricingDataService.getVehicleRates(vType, 'one_way');
-      
+
       // Calculate price for this vehicle type
       let vehiclePrice = 0;
-      
+
       // Base fare
       vehiclePrice += PricingDataService.penceToPounds(rates.base_fare_pence);
-      
+
       // Distance fee (if provided)
       if (request.distance) {
         const distanceInMiles = request.distance * 0.621371;
@@ -79,40 +79,40 @@ export class BookingTypeHandlers {
           BookingType.ONE_WAY
         );
       }
-      
+
       // Time fee (if provided)
       if (request.duration) {
         const perMinRate = PricingDataService.penceToPounds(rates.per_minute_pence);
         vehiclePrice += request.duration * perMinRate;
       }
-      
+
       // Apply minimum fare
       const minimumFare = PricingDataService.penceToPounds(rates.minimum_fare_pence);
       vehiclePrice = Math.max(vehiclePrice, minimumFare);
-      
+
       // Total for all vehicles of this type
       const totalForType = vehiclePrice * count;
       fleetSubtotal += totalForType;
-      
+
       vehicleBreakdowns.push({
         vehicleType: vType,
         count: count,
         pricePerVehicle: vehiclePrice,
         totalForType: totalForType
       });
-      
+
       breakdown.details.push({
         component: 'fleet_vehicle',
         amount: totalForType,
         description: `${count} × ${vType} @ £${vehiclePrice.toFixed(2)} each`
       });
     }
-    
+
     // Apply fleet tier discount
     let fleetDiscount = 0;
     const tier2 = fleetSettings.discounts.tier2;
     const tier1 = fleetSettings.discounts.tier1;
-    
+
     if (totalVehicles >= tier2.min_vehicles) {
       fleetDiscount = fleetSubtotal * tier2.discount_rate;
       breakdown.details.push({
@@ -128,7 +128,7 @@ export class BookingTypeHandlers {
         description: `Fleet discount (${totalVehicles} vehicles, ${(tier1.discount_rate * 100).toFixed(0)}%)`
       });
     }
-    
+
     breakdown.subtotal = fleetSubtotal - fleetDiscount;
     breakdown.discounts += fleetDiscount;
   }
@@ -144,9 +144,9 @@ export class BookingTypeHandlers {
     // Platform and operator commission rates (default 10% each)
     const platformRate = 0.10;
     const operatorRate = 0.10;
-    
+
     const pricePerLeg = finalPrice / 2;
-    
+
     // Outbound leg
     const outboundLeg: LegBreakdown = {
       leg_number: 1,
@@ -163,7 +163,7 @@ export class BookingTypeHandlers {
         airportFees: breakdown.airportFees / 2,
         zoneFees: breakdown.zoneFees / 2,
         tollFees: breakdown.tollFees / 2,
-        extraServices: breakdown.extraServices / 2,
+        serviceItemFees: breakdown.serviceItemFees / 2,
         subtotal: breakdown.subtotal / 2,
         leg_price: pricePerLeg
       },
@@ -171,7 +171,7 @@ export class BookingTypeHandlers {
       operator_net: pricePerLeg * (1 - platformRate),
       driver_payout: pricePerLeg * (1 - platformRate) * (1 - operatorRate)
     };
-    
+
     // Return leg
     const returnLeg: LegBreakdown = {
       leg_number: 2,
@@ -188,7 +188,7 @@ export class BookingTypeHandlers {
         airportFees: breakdown.airportFees / 2,
         zoneFees: breakdown.zoneFees / 2,
         tollFees: breakdown.tollFees / 2,
-        extraServices: breakdown.extraServices / 2,
+        serviceItemFees: breakdown.serviceItemFees / 2,
         subtotal: breakdown.subtotal / 2,
         leg_price: pricePerLeg
       },
@@ -196,7 +196,7 @@ export class BookingTypeHandlers {
       operator_net: pricePerLeg * (1 - platformRate),
       driver_payout: pricePerLeg * (1 - platformRate) * (1 - operatorRate)
     };
-    
+
     return { legs: [outboundLeg, returnLeg] };
   }
 
@@ -214,12 +214,12 @@ export class BookingTypeHandlers {
 
     const platformRate = 0.10;
     const operatorRate = 0.10;
-    
+
     const legs: LegBreakdown[] = [];
     const summary: FleetCategorySummary[] = [];
-    
+
     let legNumber = 1;
-    
+
     // Vehicle category mapping
     const vehicleMap: Record<string, string> = {
       'executive': 'EXEC',
@@ -227,17 +227,17 @@ export class BookingTypeHandlers {
       'suv': 'SUV',
       'van': 'VAN'
     };
-    
+
     for (const [fleetKey, count] of Object.entries(request.fleetConfig)) {
       if (count === 0) continue;
-      
+
       const category = vehicleMap[fleetKey] || 'EXEC';
       const vehicleType = this.getVehicleTypeFromCategory(category);
       const rates = await PricingDataService.getVehicleRates(vehicleType, 'one_way');
-      
+
       // Calculate price per vehicle of this type
       let vehiclePrice = PricingDataService.penceToPounds(rates.base_fare_pence);
-      
+
       if (request.distance) {
         const distanceInMiles = request.distance * 0.621371;
         vehiclePrice += await FeeCalculators.calculateDistanceFeeForVehicle(
@@ -246,15 +246,15 @@ export class BookingTypeHandlers {
           BookingType.ONE_WAY
         );
       }
-      
+
       if (request.duration) {
         const perMinRate = PricingDataService.penceToPounds(rates.per_minute_pence);
         vehiclePrice += request.duration * perMinRate;
       }
-      
+
       const minimumFare = PricingDataService.penceToPounds(rates.minimum_fare_pence);
       vehiclePrice = Math.max(vehiclePrice, minimumFare);
-      
+
       // Create legs for each vehicle
       for (let i = 1; i <= count; i++) {
         const leg: LegBreakdown = {
@@ -278,7 +278,7 @@ export class BookingTypeHandlers {
             airportFees: 0, // Split proportionally if needed
             zoneFees: 0,
             tollFees: 0,
-            extraServices: 0,
+            serviceItemFees: 0,
             subtotal: vehiclePrice,
             leg_price: vehiclePrice
           },
@@ -286,10 +286,10 @@ export class BookingTypeHandlers {
           operator_net: vehiclePrice * (1 - platformRate),
           driver_payout: vehiclePrice * (1 - platformRate) * (1 - operatorRate)
         };
-        
+
         legs.push(leg);
       }
-      
+
       // Add to summary
       summary.push({
         category: category,
@@ -298,7 +298,7 @@ export class BookingTypeHandlers {
         total: vehiclePrice * count
       });
     }
-    
+
     return { legs, summary };
   }
 

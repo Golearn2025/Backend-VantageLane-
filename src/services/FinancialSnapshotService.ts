@@ -1,11 +1,11 @@
 /**
  * Financial Snapshot Service
- * 
+ *
  * Creates financial snapshots when a booking is confirmed:
  * 1. Generate line items (booking_line_items)
  * 2. Create leg financial snapshots (internal_leg_financials)
  * 3. Create booking financial snapshot (internal_booking_financials)
- * 
+ *
  * These snapshots are immutable records for accounting and driver payouts
  */
 
@@ -21,7 +21,7 @@ export interface FinancialSnapshotResult {
 }
 
 export class FinancialSnapshotService {
-  
+
   /**
    * Create complete financial snapshot on booking confirmation
    * This locks in the pricing and commission structure
@@ -41,8 +41,8 @@ export class FinancialSnapshotService {
       // Get organization settings (commission rates, VAT)
       const settings = await OrganizationSettingsService.getOrganizationSettings(organizationId);
 
-      // Step 1: Create line items
-      const lineItemIds = await this.createLineItems(bookingId, quote, settings);
+      // Step 1: Line items (DEPRECATED - no longer writing pricing breakdown to booking_line_items)
+      const lineItemIds: string[] = [];
 
       // Step 2: Create leg financial snapshots
       const legFinancialIds: string[] = [];
@@ -85,8 +85,14 @@ export class FinancialSnapshotService {
   }
 
   /**
-   * Create line items for the booking
-   * Line items break down the price into individual components
+   * DEPRECATED - DO NOT USE
+   *
+   * This function is no longer called. Pricing breakdown is now stored in:
+   * - client_booking_quotes.line_items (JSONB with components[], discounts[], multipliers[])
+   * - client_leg_quotes.line_items (JSONB with components[], discounts[], multipliers[])
+   *
+   * booking_line_items table should only be used for actual service items/catalog,
+   * NOT for pricing components like base_fare, distance_fee, etc.
    */
   private static async createLineItems(
     bookingId: string,
@@ -171,7 +177,7 @@ export class FinancialSnapshotService {
     // VAT
     const subtotalBeforeVAT = quote.final_price_pence;
     const vatAmount = Math.round(subtotalBeforeVAT * settings.vat_rate);
-    
+
     lineItems.push({
       booking_id: bookingId,
       item_type: 'vat',
@@ -206,41 +212,52 @@ export class FinancialSnapshotService {
     legQuote: any,
     settings: any
   ): Promise<string> {
-    // Calculate VAT
-    const priceBeforeVAT = legQuote.leg_price_pence;
-    const vatAmount = Math.round(priceBeforeVAT * settings.vat_rate);
-    const priceWithVAT = priceBeforeVAT + vatAmount;
+    // Calculate from quote fields (aligned with schema)
+    const subtotalPence = legQuote.subtotal_pence || 0;
+    const discountPence = legQuote.discount_pence || 0;
+    const vatAmount = legQuote.vat_pence || 0;
+    const totalPence = legQuote.total_pence || 0;
 
-    // Calculate commissions
-    const platformFee = Math.round(priceBeforeVAT * settings.platform_commission_pct);
-    const operatorNet = priceBeforeVAT - platformFee;
-    const operatorCommission = Math.round(operatorNet * settings.operator_commission_pct);
-    const driverPayout = operatorNet - operatorCommission;
+    // Price before VAT = subtotal - discount
+    const subtotalExVatPence = subtotalPence - discountPence;
+
+    // Calculate commissions (from subtotal ex VAT)
+    const platformFeePence = Math.round(subtotalExVatPence * settings.platform_commission_pct);
+    const operatorFeePence = Math.round((subtotalExVatPence - platformFeePence) * settings.operator_commission_pct);
+    const driverPayoutPence = subtotalExVatPence - platformFeePence - operatorFeePence;
+    const vendorCostPence = driverPayoutPence; // Driver payout is main operational cost
+
+    // Build line_items JSONB snapshot
+    const lineItems = {
+      source: 'quote_snapshot',
+      quote_id: legQuote.id,
+      pricing: {
+        subtotal_pence: subtotalPence,
+        discount_pence: discountPence,
+        vat_pence: vatAmount,
+        total_pence: totalPence
+      },
+      components: legQuote.line_items?.components || [],
+      commissions: {
+        platform_fee_pence: platformFeePence,
+        operator_fee_pence: operatorFeePence,
+        driver_payout_pence: driverPayoutPence
+      }
+    };
 
     const { data, error } = await supabase
       .from('internal_leg_financials')
       .insert({
+        booking_leg_id: legQuote.booking_leg_id || null,
         booking_id: bookingId,
-        leg_quote_id: legQuote.id,
-        leg_number: legQuote.leg_number,
-        leg_type: legQuote.leg_type,
-        
-        // Pricing snapshot (pence)
-        customer_price_pence: priceWithVAT,
-        price_before_vat_pence: priceBeforeVAT,
-        vat_amount_pence: vatAmount,
-        vat_rate: settings.vat_rate,
-        
-        // Commission breakdown (pence)
-        platform_fee_pence: platformFee,
-        platform_commission_pct: settings.platform_commission_pct,
-        operator_net_pence: operatorNet,
-        operator_commission_pence: operatorCommission,
-        operator_commission_pct: settings.operator_commission_pct,
-        driver_payout_pence: driverPayout,
-        
+        version: 1,
         currency: 'GBP',
-        snapshot_created_at: new Date().toISOString()
+        driver_payout_pence: driverPayoutPence,
+        platform_fee_pence: platformFeePence,
+        vendor_cost_pence: vendorCostPence,
+        line_items: lineItems,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       })
       .select('id')
       .single();
@@ -261,43 +278,147 @@ export class FinancialSnapshotService {
     legFinancialIds: string[],
     settings: any
   ): Promise<string> {
-    // Calculate VAT
-    const priceBeforeVAT = quote.final_price_pence;
-    const vatAmount = Math.round(priceBeforeVAT * settings.vat_rate);
-    const priceWithVAT = priceBeforeVAT + vatAmount;
+    // Calculate from quote fields (aligned with schema)
+    const subtotalPence = quote.subtotal_pence || 0;
+    const discountPence = quote.discount_pence || 0;
+    const vatAmountPence = quote.vat_pence || 0;
+    const grossAmountPence = quote.total_pence || 0;
 
-    // Calculate commissions
-    const platformFee = Math.round(priceBeforeVAT * settings.platform_commission_pct);
-    const operatorNet = priceBeforeVAT - platformFee;
-    const operatorCommission = Math.round(operatorNet * settings.operator_commission_pct);
-    const driverPayout = operatorNet - operatorCommission;
+    // Subtotal ex VAT = subtotal - discount
+    const subtotalExVatPence = subtotalPence - discountPence;
+
+    // Calculate commissions (from subtotal ex VAT)
+    const platformFeePence = Math.round(subtotalExVatPence * settings.platform_commission_pct);
+    const operatorFeePence = Math.round((subtotalExVatPence - platformFeePence) * settings.operator_commission_pct);
+    const driverPayoutPence = subtotalExVatPence - platformFeePence - operatorFeePence;
+
+    // Calculate driver base vs extras payout split
+    const vehicleSubtotalPence = quote.vehicle_subtotal_pence || 0;
+    const vehicleDiscountPence = quote.vehicle_discount_pence || 0;
+    const servicesSubtotalPence = quote.services_subtotal_pence || 0;
+
+    const vehicleNetPence = vehicleSubtotalPence - vehicleDiscountPence;
+
+    // Driver base payout = (vehicle net) - fees on vehicle portion
+    const platformFeeOnVehicle = Math.round(vehicleNetPence * settings.platform_commission_pct);
+    const operatorFeeOnVehicle = Math.round((vehicleNetPence - platformFeeOnVehicle) * settings.operator_commission_pct);
+    const driverBasePayoutPence = vehicleNetPence - platformFeeOnVehicle - operatorFeeOnVehicle;
+
+    // Driver extras payout from service_item_payout_rules
+    let driverExtrasPayoutPence = 0;
+
+    // Extract service items from quote line_items
+    const serviceItems = quote.line_items?.components?.filter((c: any) => c.code === 'service_item') || [];
+
+    for (const item of serviceItems) {
+      try {
+        const { PricingDataService } = await import('./PricingDataService');
+        const payoutRules = await PricingDataService.getServiceItemPayoutRules(
+          item.service_item_id || item.label,
+          quote.organization_id
+        );
+
+        for (const rule of payoutRules) {
+          if (rule.recipient_type === 'driver') {
+            if (rule.payout_mode === 'fixed') {
+              driverExtrasPayoutPence += rule.payout_value;
+            } else if (rule.payout_mode === 'percentage') {
+              const itemPricePence = item.amount_pence || 0;
+              driverExtrasPayoutPence += Math.round(itemPricePence * (rule.payout_value / 10000));
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load payout rules for service item:', error);
+      }
+    }
+
+    // Fee rates in basis points (1% = 100 bp)
+    const platformFeeRateBp = Math.round(settings.platform_commission_pct * 10000);
+    const operatorFeeRateBp = Math.round(settings.operator_commission_pct * 10000);
+
+    // Vendor cost = driver payout (main operational cost)
+    const vendorCostPence = driverPayoutPence;
+
+    // Platform profit = platform fee (simplified for now)
+    const platformProfitPence = platformFeePence;
+
+    // Temporary values (until payment integration complete)
+    const processorFeePence = 0; // No processor fee yet
+    const netCollectedPence = grossAmountPence; // Full amount collected
+    const netToPlatformPence = platformFeePence;
+    const netToOperatorPence = operatorFeePence;
+    const netToDriverPence = driverPayoutPence;
+
+    // Build line_items JSONB snapshot
+    const lineItems = {
+      source: 'quote_snapshot',
+      quote_id: quote.id,
+      summary: {
+        subtotal_pence: subtotalPence,
+        discount_pence: discountPence,
+        vat_pence: vatAmountPence,
+        gross_amount_pence: grossAmountPence,
+        subtotal_ex_vat_pence: subtotalExVatPence
+      },
+      components: quote.line_items?.components || [],
+      discounts: quote.line_items?.discounts || [],
+      multipliers: quote.line_items?.multipliers || [],
+      commissions: {
+        platform_fee_pence: platformFeePence,
+        operator_fee_pence: operatorFeePence,
+        driver_payout_pence: driverPayoutPence,
+        platform_fee_rate_bp: platformFeeRateBp,
+        operator_fee_rate_bp: operatorFeeRateBp
+      },
+      leg_financial_ids: legFinancialIds
+    };
 
     const { data, error } = await supabase
       .from('internal_booking_financials')
       .insert({
         booking_id: bookingId,
-        booking_quote_id: quote.id,
+        quote_id: quote.id,
         pricing_version_id: quote.pricing_version_id || null,
-        
-        // Pricing snapshot (pence)
-        customer_price_pence: priceWithVAT,
-        price_before_vat_pence: priceBeforeVAT,
-        vat_amount_pence: vatAmount,
-        vat_rate: settings.vat_rate,
-        
-        // Commission breakdown (pence)
-        platform_fee_pence: platformFee,
-        platform_commission_pct: settings.platform_commission_pct,
-        operator_net_pence: operatorNet,
-        operator_commission_pence: operatorCommission,
-        operator_commission_pct: settings.operator_commission_pct,
-        driver_payout_pence: driverPayout,
-        
-        // Link to leg financials
-        leg_financial_ids: legFinancialIds,
-        
+        version: 1,
         currency: 'GBP',
-        snapshot_created_at: new Date().toISOString()
+
+        // Pricing fields (aligned with schema)
+        gross_amount_pence: grossAmountPence,
+        vat_amount_pence: vatAmountPence,
+        subtotal_ex_vat_pence: subtotalExVatPence,
+
+        // Fee rates (basis points)
+        platform_fee_rate_bp: platformFeeRateBp,
+        operator_fee_rate_bp: operatorFeeRateBp,
+
+        // Fee amounts (pence)
+        platform_fee_pence: platformFeePence,
+        operator_fee_pence: operatorFeePence,
+        driver_payout_pence: driverPayoutPence,
+        driver_base_payout_pence: driverBasePayoutPence,
+        driver_extras_payout_pence: driverExtrasPayoutPence,
+        vendor_cost_pence: vendorCostPence,
+        platform_profit_pence: platformProfitPence,
+        processor_fee_pence: processorFeePence,
+
+        // Net amounts (pence)
+        net_collected_pence: netCollectedPence,
+        net_to_platform_pence: netToPlatformPence,
+        net_to_operator_pence: netToOperatorPence,
+        net_to_driver_pence: netToDriverPence,
+
+        // Payment linkage (temporary null until payment integration)
+        booking_payment_id: null,
+
+        // Metadata
+        pricing_source: 'quote_snapshot',
+        calculated_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+
+        // Line items JSONB
+        line_items: lineItems
       })
       .select('id')
       .single();
@@ -311,22 +432,36 @@ export class FinancialSnapshotService {
 
   /**
    * Get quote from database
+   * Uses separate queries to avoid embedded relation dependency
    */
   private static async getQuote(quoteId: string): Promise<any> {
-    const { data, error } = await supabase
+    // 1. Get booking quote
+    const { data: quote, error: quoteError } = await supabase
       .from('client_booking_quotes')
-      .select(`
-        *,
-        leg_quotes:client_leg_quotes(*)
-      `)
+      .select('*')
       .eq('id', quoteId)
       .single();
 
-    if (error) {
-      throw new Error(`Failed to fetch quote: ${error.message}`);
+    if (quoteError) {
+      throw new Error(`Failed to fetch quote: ${quoteError.message}`);
     }
 
-    return data;
+    // 2. Get leg quotes separately by booking_id (NOT booking_quote_id - column doesn't exist)
+    const { data: legQuotes, error: legError } = await supabase
+      .from('client_leg_quotes')
+      .select('*')
+      .eq('booking_id', quote.booking_id);
+
+    // Ignore error if leg quotes don't exist (optional relationship)
+    if (legError) {
+      console.warn(`No leg quotes found for booking ${quote.booking_id}: ${legError.message}`);
+    }
+
+    // 3. Attach leg_quotes manually
+    return {
+      ...quote,
+      leg_quotes: legQuotes || []
+    };
   }
 
   /**

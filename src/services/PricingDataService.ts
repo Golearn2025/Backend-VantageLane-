@@ -1,9 +1,9 @@
 /**
  * Pricing Data Service
- * 
+ *
  * Reads pricing data from normalized database VIEWS
  * Replaces old PricingConfigService that read from pricing_config JSONB
- * 
+ *
  * Views used:
  * - v_active_pricing_version
  * - v_pricing_vehicle_rates
@@ -16,7 +16,6 @@
  */
 
 import { supabase } from '../config/supabase';
-import { VehicleType, BookingType } from '../types/pricing.types';
 
 // Cache structure
 interface CacheEntry<T> {
@@ -68,7 +67,7 @@ class DataCache {
 const cache = new DataCache();
 
 export class PricingDataService {
-  
+
   /**
    * Get active pricing version
    */
@@ -78,8 +77,9 @@ export class PricingDataService {
     if (cached) return cached;
 
     const { data, error } = await supabase
-      .from('v_active_pricing_version')
+      .from('pricing_versions')
       .select('*')
+      .eq('is_active', true)
       .single();
 
     if (error) {
@@ -93,14 +93,19 @@ export class PricingDataService {
 
   /**
    * Get vehicle rates for specific vehicle type and booking type
-   * 
+   *
    * @param vehicleCategory - executive, luxury, suv, van
    * @param bookingType - one_way, return, hourly, daily, fleet
    */
   static async getVehicleRates(vehicleCategory: string, bookingType: string, organizationId?: string): Promise<any> {
     // Normalize booking type: one_way -> oneway
-    const normalizedBookingType = bookingType.replace('_', '');
-    
+    let normalizedBookingType = bookingType.replace('_', '');
+
+    // Return bookings use oneway rates (calculated per leg, then applied with return logic)
+    if (normalizedBookingType === 'return') {
+      normalizedBookingType = 'oneway';
+    }
+
     const cacheKey = `vehicle_rates:${vehicleCategory}:${normalizedBookingType}:${organizationId || 'default'}`;
     const cached = cache.get(cacheKey);
     if (cached) return cached;
@@ -111,11 +116,11 @@ export class PricingDataService {
       .eq('vehicle_category_id', vehicleCategory)
       .eq('booking_type', normalizedBookingType)
       .eq('active', true);
-    
+
     if (organizationId) {
       query = query.eq('organization_id', organizationId);
     }
-    
+
     const { data, error } = await query.single();
 
     if (error) {
@@ -126,7 +131,7 @@ export class PricingDataService {
     if (!data) {
       throw new Error(`No vehicle rates found for ${vehicleCategory} ${bookingType}`);
     }
-    
+
     const result = data;
 
     cache.set(cacheKey, result);
@@ -146,11 +151,11 @@ export class PricingDataService {
       .select('*')
       .eq('vehicle_category_id', vehicleCategory)
       .eq('active', true);
-    
+
     if (organizationId) {
       query = query.eq('organization_id', organizationId);
     }
-    
+
     const { data, error } = await query.single();
 
     if (error) {
@@ -161,7 +166,7 @@ export class PricingDataService {
     if (!data) {
       throw new Error(`No hourly rules found for ${vehicleCategory}`);
     }
-    
+
     const result = data;
 
     cache.set(cacheKey, result);
@@ -181,11 +186,11 @@ export class PricingDataService {
       .select('*')
       .eq('vehicle_category_id', vehicleCategory)
       .eq('active', true);
-    
+
     if (organizationId) {
       query = query.eq('organization_id', organizationId);
     }
-    
+
     const { data, error } = await query.single();
 
     if (error) {
@@ -196,7 +201,7 @@ export class PricingDataService {
     if (!data) {
       throw new Error(`No daily rules found for ${vehicleCategory}`);
     }
-    
+
     const result = data;
 
     cache.set(cacheKey, result);
@@ -230,7 +235,7 @@ export class PricingDataService {
   static async getTimeRule(timePeriod: string): Promise<any> {
     const rules = await this.getTimeRules();
     const rule = rules.find(r => r.time_period === timePeriod);
-    
+
     if (!rule) {
       throw new Error(`No time rule found for period: ${timePeriod}`);
     }
@@ -309,7 +314,7 @@ export class PricingDataService {
 
     // Assuming return settings are in the version view
     const version = await this.getActivePricingVersion();
-    
+
     const settings = {
       discount_rate: version.return_discount_rate || 0.10,
       minimum_hours_between: version.return_minimum_hours || 2
@@ -329,7 +334,7 @@ export class PricingDataService {
 
     // Assuming fleet settings are in the version view
     const version = await this.getActivePricingVersion();
-    
+
     const settings = {
       discounts: {
         tier1: {
@@ -356,7 +361,7 @@ export class PricingDataService {
     if (cached) return cached;
 
     const version = await this.getActivePricingVersion();
-    
+
     const policies = {
       multiStop: version.multi_stop_fee_pence ? version.multi_stop_fee_pence / 100 : 15,
       minimums: {
@@ -378,7 +383,7 @@ export class PricingDataService {
     if (cached) return cached;
 
     const version = await this.getActivePricingVersion();
-    
+
     const discounts = {
       tier1: version.corporate_tier1_discount || 0.10,
       tier2: version.corporate_tier2_discount || 0.15
@@ -401,6 +406,95 @@ export class PricingDataService {
    */
   static getCacheStatus() {
     return cache.getStatus();
+  }
+
+  /**
+   * Get all active service items
+   * Reads from: service_items table
+   */
+  static async getServiceItems(organizationId?: string): Promise<any[]> {
+    // Note: organizationId parameter kept for backward compatibility but not used
+    // service_items table is global without organization_id column
+    const cacheKey = `service_items:all`;
+    const cached = cache.get<any[]>(cacheKey);
+    if (cached) return cached;
+
+    const query = supabase
+      .from('service_items')
+      .select('*')
+      .eq('is_active', true);
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error fetching service items:', error);
+      throw new Error(`Failed to fetch service items: ${error.message}`);
+    }
+
+    cache.set(cacheKey, data || []);
+    return data || [];
+  }
+
+  /**
+   * Get specific service items by IDs
+   * Reads from: service_items table
+   */
+  static async getServiceItemsByIds(serviceIds: string[], organizationId?: string): Promise<any[]> {
+    if (!serviceIds || serviceIds.length === 0) {
+      return [];
+    }
+
+    // Note: organizationId parameter kept for backward compatibility but not used
+    // service_items table is global without organization_id column
+    const cacheKey = `service_items:${serviceIds.sort().join(',')}`;
+    const cached = cache.get<any[]>(cacheKey);
+    if (cached) return cached;
+
+    const query = supabase
+      .from('service_items')
+      .select('*')
+      .in('id', serviceIds)
+      .eq('is_active', true);
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error fetching service items by IDs:', error);
+      throw new Error(`Failed to fetch service items: ${error.message}`);
+    }
+
+    cache.set(cacheKey, data || []);
+    return data || [];
+  }
+
+  /**
+   * Get service item payout rules
+   * Reads from: service_item_payout_rules table
+   */
+  static async getServiceItemPayoutRules(serviceItemId: string, organizationId?: string): Promise<any[]> {
+    const cacheKey = `service_payout_rules:${serviceItemId}:${organizationId || 'default'}`;
+    const cached = cache.get<any[]>(cacheKey);
+    if (cached) return cached;
+
+    let query = supabase
+      .from('service_item_payout_rules')
+      .select('*')
+      .eq('service_item_id', serviceItemId)
+      .eq('is_active', true);
+
+    if (organizationId) {
+      query = query.eq('organization_id', organizationId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error(`Error fetching payout rules for ${serviceItemId}:`, error);
+      return []; // Non-critical, return empty
+    }
+
+    cache.set(cacheKey, data || []);
+    return data || [];
   }
 
   /**

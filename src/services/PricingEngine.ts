@@ -1,6 +1,6 @@
 /**
  * Core Pricing Engine - Refactored to use database views
- * 
+ *
  * CHANGES FROM OLD VERSION:
  * - Removed PricingConfigService and PricingConfigAdapter dependencies
  * - Now uses PricingDataService to read from normalized views
@@ -8,20 +8,20 @@
  * - Business logic remains UNCHANGED
  */
 
-import { 
-  PricingRequestData, 
-  PricingResult, 
-  VehicleType, 
+import {
   BookingType,
-  PricingBreakdownData
+  PricingBreakdownData,
+  PricingRequestData,
+  PricingResult,
+  VehicleType
 } from '../types/pricing.types';
-import { PricingDataService } from './PricingDataService';
 import { PricingHelpers } from '../utils/PricingHelpers';
-import { FeeCalculators } from './FeeCalculators';
 import { BookingTypeHandlers } from './BookingTypeHandlers';
+import { FeeCalculators } from './FeeCalculators';
+import { PricingDataService } from './PricingDataService';
 
 export class PricingEngine {
-  
+
   /**
    * Main method to calculate pricing
    */
@@ -39,14 +39,14 @@ export class PricingEngine {
       // Initialize breakdown
       const breakdown: PricingBreakdownData = {
         baseFare: 0,
-        distanceFee: 0, 
+        distanceFee: 0,
         timeFee: 0,
         airportFees: 0,
         zoneFees: 0,
         tollFees: 0,
         multiStopFees: 0,
         waitingFees: 0,
-        extraServices: 0,
+        serviceItemFees: 0,
         subtotal: 0,
         multipliers: {},
         discounts: 0,
@@ -102,7 +102,7 @@ export class PricingEngine {
       await FeeCalculators.calculateAdditionalServices(breakdown, request);
 
       // Calculate subtotal before booking type logic
-      breakdown.subtotal = 
+      breakdown.subtotal =
         breakdown.baseFare +
         breakdown.distanceFee +
         breakdown.timeFee +
@@ -111,7 +111,7 @@ export class PricingEngine {
         breakdown.tollFees +
         breakdown.multiStopFees +
         breakdown.waitingFees +
-        breakdown.extraServices;
+        breakdown.serviceItemFees;
 
       // Step 6: Apply booking type specific logic (RETURN or FLEET)
       if (request.bookingType === BookingType.RETURN) {
@@ -135,7 +135,7 @@ export class PricingEngine {
       const roundingRules = await PricingDataService.getRoundingRules();
       const priceBeforeRounding = breakdown.finalPrice || (breakdown.subtotal - breakdown.discounts);
       breakdown.finalPrice = PricingHelpers.applyRounding(
-        priceBeforeRounding, 
+        priceBeforeRounding,
         {
           to: roundingRules.round_to_pence ? roundingRules.round_to_pence / 100 : 5,
           direction: roundingRules.direction || 'up'
@@ -192,7 +192,7 @@ export class PricingEngine {
    * Create success response with breakdown
    */
   private static async createSuccessResponse(
-    breakdown: PricingBreakdownData, 
+    breakdown: PricingBreakdownData,
     request: PricingRequestData,
     pricingVersionId?: string
   ): Promise<PricingResult> {
@@ -206,7 +206,7 @@ export class PricingEngine {
         distanceFee: breakdown.distanceFee,
         timeFee: breakdown.timeFee,
         additionalFees: breakdown.airportFees + breakdown.zoneFees + breakdown.tollFees,
-        services: breakdown.multiStopFees + breakdown.extraServices,
+        services: breakdown.multiStopFees + breakdown.serviceItemFees,
         subtotal: breakdown.subtotal,
         multipliers: breakdown.multipliers,
         discounts: breakdown.discounts,
@@ -219,8 +219,8 @@ export class PricingEngine {
     // Generate legs breakdown for RETURN bookings
     if (request.bookingType === BookingType.RETURN) {
       const { legs } = await BookingTypeHandlers.generateReturnLegs(
-        breakdown, 
-        request, 
+        breakdown,
+        request,
         breakdown.finalPrice
       );
       result.legs = legs;

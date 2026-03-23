@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { body } from 'express-validator';
 import { PricingController } from '../controllers/PricingController';
 import { VehicleType, BookingType } from '../types/pricing.types';
+import { calculateAndQuote } from '../api/pricing/calculate-and-quote';
 
 const router = Router();
 
@@ -24,6 +25,11 @@ const pricingValidation = [
   body('corporateTier').optional().isIn(['tier1', 'tier2']).withMessage('Invalid corporate tier')
 ];
 
+// Phase 2A validation (organizationId comes from auth context, not request body)
+const calculateAndQuoteValidation = [
+  ...pricingValidation
+];
+
 /**
  * @route POST /api/pricing/calculate
  * @desc Calculate price with provided distance/duration
@@ -37,6 +43,13 @@ router.post('/calculate', pricingValidation, PricingController.calculatePrice);
  * @access Public
  */
 router.post('/calculate-with-commissions', pricingValidation, PricingController.calculateWithCommissions);
+
+/**
+ * @route POST /api/pricing/calculate-and-quote
+ * @desc Phase 2A: Calculate price AND create independent quote
+ * @access Public
+ */
+router.post('/calculate-and-quote', calculateAndQuoteValidation, calculateAndQuote);
 
 /**
  * @route GET /api/pricing/health

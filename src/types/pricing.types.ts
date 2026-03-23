@@ -12,7 +12,7 @@ export enum VehicleType {
 
 export enum BookingType {
   ONE_WAY = 'one_way',
-  RETURN = 'return', 
+  RETURN = 'return',
   HOURLY = 'hourly',
   DAILY = 'daily',
   FLEET = 'fleet'
@@ -172,7 +172,7 @@ export interface PricingBreakdownData {
   tollFees: number;
   multiStopFees: number;
   waitingFees: number;
-  extraServices: number;
+  serviceItemFees: number;
   subtotal: number;
   multipliers: Record<string, number>;
   discounts: number;
@@ -199,7 +199,7 @@ export interface LegBreakdown {
   scheduled_at?: string;
   distance_miles?: number;
   duration_min?: number;
-  
+
   // Pricing breakdown per leg
   pricing: {
     baseFare: number;
@@ -208,11 +208,11 @@ export interface LegBreakdown {
     airportFees: number;
     zoneFees: number;
     tollFees: number;
-    extraServices: number;
+    serviceItemFees: number;
     subtotal: number;
     leg_price: number; // Final price for this leg
   };
-  
+
   // Commission breakdown per leg
   platform_fee: number;
   operator_net: number;
@@ -246,13 +246,13 @@ export interface PricingResult {
     finalPrice: number;
   };
   details?: PricingDetail[];
-  
+
   // ✅ NEW: Legs breakdown for RETURN and FLEET
   legs?: LegBreakdown[];
-  
+
   // ✅ NEW: Fleet summary (only for FLEET bookings)
   fleet_summary?: FleetCategorySummary[];
-  
+
   error?: string;
   code?: number;
   timestamp: string;

@@ -1,13 +1,13 @@
 /**
  * Quote Service
- * 
+ *
  * Handles persistence of pricing quotes to database:
  * 1. Create leg quotes (client_leg_quotes)
  * 2. Create booking quote (client_booking_quotes)
  */
 
 import { supabase } from '../config/supabase';
-import { PricingResult, LegBreakdown } from '../types/pricing.types';
+import { LegBreakdown, PricingResult } from '../types/pricing.types';
 
 export interface QuoteCreationResult {
   booking_quote_id: string;
@@ -17,13 +17,148 @@ export interface QuoteCreationResult {
 }
 
 export class QuoteService {
-  
+
+  /**
+   * Create independent quote (Phase 2A)
+   * Creates a quote without booking_id for price estimation before booking creation
+   * 
+   * PHASE 2A DESIGN NOTES:
+   * - These are client-facing independent quotes (booking_id = NULL)
+   * - VAT is NOT calculated or persisted at this stage (vat_pence = 0, vat_rate = 0)
+   * - Tax/VAT treatment will be applied later when quote is converted to booking
+   * - total_pence uses PricingEngine.finalPrice for API consistency
+   * - Financial snapshot becomes complete only at booking/invoicing stage
+   */
+  static async createIndependentQuote(
+    pricingResult: PricingResult,
+    requestData: any,
+    organizationId: string
+  ): Promise<QuoteCreationResult> {
+    try {
+      console.log('🎯 Creating independent quote for organization:', organizationId);
+
+      // Calculate pricing totals from actual breakdown (FIXED for consistency)
+      const breakdown = pricingResult.breakdown;
+      const subtotalPence = Math.round((breakdown?.subtotal || 0) * 100);
+      const discountPence = Math.round((breakdown?.discounts || 0) * 100);
+
+      // CRITICAL FIX: Use PricingEngine.finalPrice for consistency with API response
+      const totalPence = Math.round((pricingResult.finalPrice || 0) * 100);
+
+      // Phase 2A: PricingEngine doesn't calculate VAT, so we set VAT to zero
+      // VAT will be calculated later when quote is converted to booking
+      const vatPence = 0;
+      const vatRate = 0;
+
+      // Vehicle vs Services split (matching createBookingQuote semantics)
+      const vehicleSubtotalPence = Math.round(
+        ((breakdown?.baseFare || 0) +
+          (breakdown?.distanceFee || 0) +
+          (breakdown?.timeFee || 0) +
+          (breakdown?.additionalFees || 0)) * 100  // Include additionalFees like existing code
+      );
+      const servicesSubtotalPence = Math.round((breakdown?.services || 0) * 100);
+
+      const vehicleDiscountPence = 0; // No separate vehicle discount yet
+      const servicesDiscountPence = 0; // No separate services discount yet
+
+      // Create independent quote with booking_id = NULL
+      const { data, error } = await supabase
+        .from('client_booking_quotes')
+        .insert({
+          booking_id: null, // Phase 2A: Independent quote
+          organization_id: organizationId,
+          version: 1,
+          is_locked: false,
+          quote_valid_until: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          currency: pricingResult.currency || 'GBP',
+          pricing_version_id: pricingResult.pricing_version_id || null,
+
+          // Required pricing fields
+          subtotal_pence: subtotalPence,
+          discount_pence: discountPence,
+          vat_rate: vatRate,
+          vat_pence: vatPence,
+          total_pence: totalPence,
+
+          // Vehicle vs Services split
+          vehicle_subtotal_pence: vehicleSubtotalPence,
+          vehicle_discount_pence: vehicleDiscountPence,
+          services_subtotal_pence: servicesSubtotalPence,
+          services_discount_pence: servicesDiscountPence,
+
+          // Line items as JSONB
+          line_items: {
+            components: [
+              { code: 'base_fare', label: 'Base fare', amount_pence: Math.round((pricingResult.breakdown?.baseFare || 0) * 100) },
+              { code: 'distance_fee', label: 'Distance fee', amount_pence: Math.round((pricingResult.breakdown?.distanceFee || 0) * 100) },
+              { code: 'time_fee', label: 'Time fee', amount_pence: Math.round((pricingResult.breakdown?.timeFee || 0) * 100) },
+              { code: 'additional_fees', label: 'Additional fees', amount_pence: Math.round((pricingResult.breakdown?.additionalFees || 0) * 100) },
+              { code: 'service_item_fees', label: 'Service Item Fees', amount_pence: Math.round((pricingResult.breakdown?.services || 0) * 100) }
+            ].filter(c => c.amount_pence > 0),
+            discounts: (pricingResult.breakdown?.discounts || 0) > 0
+              ? [{ code: 'discount', label: 'Discount', amount_pence: Math.round((pricingResult.breakdown?.discounts || 0) * 100) }]
+              : [],
+            multipliers: Object.entries(pricingResult.breakdown?.multipliers || {}).map(([code, factor]) => ({
+              code,
+              label: code.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+              factor: factor as number
+            })),
+            summary: {
+              subtotal_pence: subtotalPence,
+              discount_pence: discountPence,
+              vat_pence: vatPence,
+              total_pence: totalPence
+            }
+          },
+
+          // Metadata
+          calc_source: 'pricing_engine_v2',
+          calc_version: '2.0.0',
+          calculated_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          is_current: true
+        })
+        .select('id')
+        .single();
+
+      if (error) {
+        console.error('❌ Error creating independent quote:', error);
+        console.error('Error details:', {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint
+        });
+        throw new Error(`Failed to create independent quote: ${error.message}`);
+      }
+
+      console.log('✅ Independent quote created successfully:', data.id);
+
+      return {
+        booking_quote_id: data.id,
+        leg_quote_ids: [], // No leg quotes for independent quotes (Phase 2A)
+        success: true
+      };
+
+    } catch (error) {
+      console.error('❌ Error in createIndependentQuote:', error);
+      return {
+        booking_quote_id: '',
+        leg_quote_ids: [],
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
   /**
    * Create complete quote (legs + booking)
    * This is called after pricing calculation
-   * 
-   * NOTE: booking_id is optional. If not provided, quote is created without FK constraint
-   * (useful for price estimation before booking creation)
+   *
+   * NOTE: booking_id is required for this method. For independent quotes (Phase 2A),
+   * use createIndependentQuote() instead.
    */
   static async createQuote(
     pricingResult: PricingResult,
@@ -41,10 +176,10 @@ export class QuoteService {
           success: true
         };
       }
-      
+
       // Step 1: Create leg quotes
       const legQuoteIds: string[] = [];
-      
+
       if (pricingResult.legs && pricingResult.legs.length > 0) {
         for (const leg of pricingResult.legs) {
           const legQuoteId = await this.createLegQuote(leg, organizationId, bookingId);
@@ -95,7 +230,7 @@ export class QuoteService {
     bookingId: string
   ): Promise<string> {
     const bookingLegId = crypto.randomUUID();
-    
+
     const { data, error } = await supabase
       .from('client_leg_quotes')
       .insert({
@@ -105,24 +240,38 @@ export class QuoteService {
         version: 1,
         is_locked: false,
         currency: 'GBP',
-        
+
         // Required fields with defaults
         subtotal_pence: Math.round((leg.pricing?.subtotal || 0) * 100),
         discount_pence: 0,
         vat_rate: 0.20,
         vat_pence: Math.round((leg.pricing?.subtotal || 0) * 100 * 0.20),
         total_pence: Math.round((leg.pricing?.leg_price || leg.pricing?.subtotal || 0) * 100),
-        
+
         line_items: {
-          base_fare: leg.pricing?.baseFare || 0,
-          distance_fee: leg.pricing?.distanceFee || 0,
-          time_fee: leg.pricing?.timeFee || 0,
-          airport_fees: leg.pricing?.airportFees || 0,
-          zone_fees: leg.pricing?.zoneFees || 0,
-          toll_fees: leg.pricing?.tollFees || 0,
-          extra_services: leg.pricing?.extraServices || 0
+          components: [
+            { code: 'base_fare', label: 'Base fare', amount_pence: Math.round((leg.pricing?.baseFare || 0) * 100) },
+            { code: 'distance_fee', label: 'Distance fee', amount_pence: Math.round((leg.pricing?.distanceFee || 0) * 100) },
+            { code: 'time_fee', label: 'Time fee', amount_pence: Math.round((leg.pricing?.timeFee || 0) * 100) },
+            { code: 'airport_fee', label: 'Airport fee', amount_pence: Math.round((leg.pricing?.airportFees || 0) * 100) },
+            { code: 'zone_fee', label: 'Zone fee', amount_pence: Math.round((leg.pricing?.zoneFees || 0) * 100) },
+            { code: 'toll_fee', label: 'Toll fee', amount_pence: Math.round((leg.pricing?.tollFees || 0) * 100) },
+            { code: 'service_item_fees', label: 'Service Item Fees', amount_pence: Math.round((leg.pricing?.serviceItemFees || 0) * 100) }
+          ].filter(c => c.amount_pence > 0),
+          discounts: [],
+          multipliers: [],
+          summary: {
+            subtotal_pence: Math.round((leg.pricing?.subtotal || 0) * 100),
+            discount_pence: 0,
+            vat_pence: Math.round((leg.pricing?.subtotal || 0) * 100 * 0.20),
+            total_pence: Math.round((leg.pricing?.leg_price || leg.pricing?.subtotal || 0) * 100)
+          },
+          meta: {
+            calc_source: 'pricing_engine_v2',
+            calc_version: '2.0.0'
+          }
         },
-        
+
         calc_source: 'pricing_engine_v2',
         calc_version: '2.0.0',
         calculated_at: new Date().toISOString(),
@@ -155,7 +304,20 @@ export class QuoteService {
     const vatRate = 0.20;
     const vatPence = Math.round(subtotalPence * vatRate);
     const totalPence = subtotalPence + vatPence - discountPence;
-    
+
+    // Calculate vehicle vs services split
+    const vehicleSubtotalPence = Math.round((
+      (pricingResult.breakdown?.baseFare || 0) +
+      (pricingResult.breakdown?.distanceFee || 0) +
+      (pricingResult.breakdown?.timeFee || 0) +
+      (pricingResult.breakdown?.additionalFees || 0)
+    ) * 100);
+
+    const servicesSubtotalPence = Math.round((pricingResult.breakdown?.services || 0) * 100);
+
+    const vehicleDiscountPence = 0; // No separate vehicle discount yet
+    const servicesDiscountPence = 0; // No separate services discount yet
+
     const { data, error } = await supabase
       .from('client_booking_quotes')
       .insert({
@@ -165,25 +327,51 @@ export class QuoteService {
         is_locked: false,
         quote_valid_until: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         currency: pricingResult.currency || 'GBP',
-        
+        pricing_version_id: pricingResult.pricing_version_id || null,
+
         // Required pricing fields
         subtotal_pence: subtotalPence,
         discount_pence: discountPence,
         vat_rate: vatRate,
         vat_pence: vatPence,
         total_pence: totalPence,
-        
+
+        // Vehicle vs Services split
+        vehicle_subtotal_pence: vehicleSubtotalPence,
+        vehicle_discount_pence: vehicleDiscountPence,
+        services_subtotal_pence: servicesSubtotalPence,
+        services_discount_pence: servicesDiscountPence,
+
         // Line items as JSONB
         line_items: {
-          base_fare: pricingResult.breakdown?.baseFare || 0,
-          distance_fee: pricingResult.breakdown?.distanceFee || 0,
-          time_fee: pricingResult.breakdown?.timeFee || 0,
-          additional_fees: pricingResult.breakdown?.additionalFees || 0,
-          services: pricingResult.breakdown?.services || 0,
-          multipliers: pricingResult.breakdown?.multipliers || {},
-          discounts: pricingResult.breakdown?.discounts || 0
+          components: [
+            { code: 'base_fare', label: 'Base fare', amount_pence: Math.round((pricingResult.breakdown?.baseFare || 0) * 100) },
+            { code: 'distance_fee', label: 'Distance fee', amount_pence: Math.round((pricingResult.breakdown?.distanceFee || 0) * 100) },
+            { code: 'time_fee', label: 'Time fee', amount_pence: Math.round((pricingResult.breakdown?.timeFee || 0) * 100) },
+            // NOTE: additional_fees is aggregated (airport+zone+toll) because pricingResult.breakdown doesn't have them separated
+            { code: 'additional_fees', label: 'Additional fees', amount_pence: Math.round((pricingResult.breakdown?.additionalFees || 0) * 100) },
+            { code: 'service_item_fees', label: 'Service Item Fees', amount_pence: Math.round((pricingResult.breakdown?.services || 0) * 100) }
+          ].filter(c => c.amount_pence > 0),
+          discounts: (pricingResult.breakdown?.discounts || 0) > 0
+            ? [{ code: 'discount', label: 'Discount', amount_pence: Math.round((pricingResult.breakdown?.discounts || 0) * 100) }]
+            : [],
+          multipliers: Object.entries(pricingResult.breakdown?.multipliers || {}).map(([code, factor]) => ({
+            code,
+            label: code.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+            factor: factor as number
+          })),
+          summary: {
+            subtotal_pence: subtotalPence,
+            discount_pence: discountPence,
+            vat_pence: vatPence,
+            total_pence: totalPence
+          },
+          meta: {
+            calc_source: 'pricing_engine_v2',
+            calc_version: '2.0.0'
+          }
         },
-        
+
         calc_source: 'pricing_engine_v2',
         calc_version: '2.0.0',
         calculated_at: new Date().toISOString(),
@@ -228,19 +416,22 @@ export class QuoteService {
   }
 
   /**
-   * Update quote status
+   * DEPRECATED - NO-OP
+   *
+   * Update quote status - NOT IMPLEMENTED
+   *
+   * The column 'quote_status' does not exist in client_booking_quotes table.
+   * This function is kept for backward compatibility but does nothing.
+   *
+   * TODO: Implement quote status tracking when schema is updated to include status column,
+   * or remove this function and all its call sites if status tracking is not needed.
    */
   static async updateQuoteStatus(
     quoteId: string,
     status: 'pending' | 'accepted' | 'rejected' | 'expired'
   ): Promise<void> {
-    const { error } = await supabase
-      .from('client_booking_quotes')
-      .update({ quote_status: status })
-      .eq('id', quoteId);
-
-    if (error) {
-      throw new Error(`Failed to update quote status: ${error.message}`);
-    }
+    console.warn(`⚠️  updateQuoteStatus() is deprecated (quote_status column doesn't exist). Called with quoteId=${quoteId}, status=${status}`);
+    // No-op: quote_status column doesn't exist in client_booking_quotes
+    return;
   }
 }

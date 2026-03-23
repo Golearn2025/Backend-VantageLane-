@@ -9,6 +9,9 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { config } from 'dotenv';
 
+// Import middleware
+import { devAuthMiddleware } from './middleware/devAuth';
+
 // Load environment variables
 config();
 
@@ -24,17 +27,17 @@ const PORT = process.env.PORT || 3000;
 // Security middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? (process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : ['https://your-frontend-domain.com']) 
+  origin: process.env.NODE_ENV === 'production'
+    ? (process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : ['https://your-frontend-domain.com'])
     : [
-        'http://localhost:3000', 
-        'http://localhost:3001', 
-        'http://localhost:5173',
-        'http://127.0.0.1:3000',
-        'http://127.0.0.1:51997', // Windsurf browser preview
-        /^http:\/\/127\.0\.0\.1:\d+$/, // Any localhost port
-        /^http:\/\/localhost:\d+$/ // Any localhost port
-      ],
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:5173',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:51997', // Windsurf browser preview
+      /^http:\/\/127\.0\.0\.1:\d+$/, // Any localhost port
+      /^http:\/\/localhost:\d+$/ // Any localhost port
+    ],
   credentials: true
 }));
 
@@ -52,6 +55,9 @@ app.use('/api/', limiter);
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Development auth middleware (only in development)
+app.use('/api/pricing/calculate-and-quote', devAuthMiddleware);
 
 // API Routes
 app.use('/api/pricing', pricingRoutes);

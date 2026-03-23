@@ -1,6 +1,6 @@
 /**
  * Fee Calculators - Refactored to use database views via PricingDataService
- * 
+ *
  * CHANGES FROM OLD VERSION:
  * - Removed dependency on PricingConfig JSONB
  * - Now reads from normalized database views
@@ -8,11 +8,11 @@
  * - Uses PricingDataService instead of PricingConfigService
  */
 
-import { 
-  PricingRequestData, 
+import {
   BookingType,
-  VehicleType,
-  PricingBreakdownData
+  PricingBreakdownData,
+  PricingRequestData,
+  VehicleType
 } from '../types/pricing.types';
 import { PricingHelpers } from '../utils/PricingHelpers';
 import { PricingDataService } from './PricingDataService';
@@ -29,10 +29,10 @@ export class FeeCalculators {
       request.bookingType,
       request.organizationId
     );
-    
+
     // Convert pence to pounds
     breakdown.baseFare = PricingDataService.penceToPounds(rates.base_fare_pence);
-    
+
     breakdown.details.push({
       component: 'base_fare',
       amount: breakdown.baseFare,
@@ -46,10 +46,10 @@ export class FeeCalculators {
    */
   static async calculateHourlyFee(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
     const requestedHours = request.hours || 3;
-    
+
     const hourlyRules = await PricingDataService.getHourlyRules(request.vehicleType, request.organizationId);
     const rates = await PricingDataService.getVehicleRates(request.vehicleType, 'hourly', request.organizationId);
-    
+
     const billableHours = Math.min(
       Math.max(requestedHours, hourlyRules.minimum_hours),
       hourlyRules.maximum_hours
@@ -58,9 +58,9 @@ export class FeeCalculators {
     // Convert pence to pounds
     const hourlyRate = PricingDataService.penceToPounds(rates.hourly_rate_pence);
     const hourlyFee = billableHours * hourlyRate;
-    
+
     breakdown.timeFee = hourlyFee;
-    
+
     breakdown.details.push({
       component: 'hourly_fee',
       amount: hourlyFee,
@@ -107,23 +107,23 @@ export class FeeCalculators {
       request.bookingType,
       request.organizationId
     );
-    
+
     // Distance is already in miles from frontend
     const distanceInMiles = request.distance;
-    
+
     // Tiered pricing: first 6 miles at higher rate, rest at lower rate
     const first6miles = Math.min(distanceInMiles, 6);
     const remaining = Math.max(distanceInMiles - 6, 0);
-    
+
     // Convert pence to pounds
     const perMileRate1 = PricingDataService.penceToPounds(rates.per_mile_first_6_pence);
     const perMileRate2 = PricingDataService.penceToPounds(rates.per_mile_after_6_pence);
-    
+
     const first6Fee = first6miles * perMileRate1;
     const remainingFee = remaining * perMileRate2;
-    
+
     breakdown.distanceFee = first6Fee + remainingFee;
-    
+
     breakdown.details.push({
       component: 'distance_fee',
       amount: breakdown.distanceFee,
@@ -143,13 +143,13 @@ export class FeeCalculators {
       request.bookingType,
       request.organizationId
     );
-    
+
     const actualTime = request.duration;
-    
+
     // Convert pence to pounds
     const perMinRate = PricingDataService.penceToPounds(rates.per_minute_pence);
     breakdown.timeFee = actualTime * perMinRate;
-    
+
     breakdown.details.push({
       component: 'time_fee',
       amount: breakdown.timeFee,
@@ -165,7 +165,7 @@ export class FeeCalculators {
     // Airport fees
     const pickupAirport = PricingHelpers.detectAirport(request.pickup);
     const dropoffAirport = PricingHelpers.detectAirport(request.dropoff);
-    
+
     if (pickupAirport) {
       const airportFee = await PricingDataService.getAirportFee(pickupAirport);
       if (airportFee) {
@@ -178,7 +178,7 @@ export class FeeCalculators {
         });
       }
     }
-    
+
     if (dropoffAirport && dropoffAirport !== pickupAirport) {
       const airportFee = await PricingDataService.getAirportFee(dropoffAirport);
       if (airportFee) {
@@ -191,7 +191,7 @@ export class FeeCalculators {
         });
       }
     }
-    
+
     // Congestion and zone fees
     const zones = PricingHelpers.detectZones(request.pickup, request.dropoff);
     for (const zone of zones) {
@@ -219,7 +219,7 @@ export class FeeCalculators {
       'dartford': 'dartford',
       'm6 toll': 'm6_toll'
     };
-    
+
     for (const address of addresses) {
       for (const [keyword, tollCode] of Object.entries(tollKeywords)) {
         if (address.includes(keyword)) {
@@ -241,10 +241,10 @@ export class FeeCalculators {
 
   /**
    * Calculate additional services fees
-   * Reads from: v_active_pricing_version (multi-stop fee)
+   * Reads from: v_active_pricing_version (multi-stop fee), service_items (premium services)
    */
   static async calculateAdditionalServices(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
-    // Multi-stop fee
+    // Multi-stop fee (legacy)
     if (request.extras?.includes('multi_stop')) {
       const policies = await PricingDataService.getServicePolicies();
       const fee = policies.multiStop;
@@ -255,14 +255,29 @@ export class FeeCalculators {
         description: 'Multi-stop service'
       });
     }
-    
-    // Premium services (child seat, champagne, flowers, etc.)
-    // Note: These would need to be in a separate premium_services table/view
-    // For now, skipping as they're not in the normalized structure yet
+
+    // Premium services from service_items table
     const otherExtras = request.extras?.filter(e => e !== 'multi_stop') || [];
     if (otherExtras.length > 0) {
-      // TODO: Query premium services table when available
-      console.log('Premium services requested but not yet implemented in normalized DB:', otherExtras);
+      try {
+        const serviceItems = await PricingDataService.getServiceItemsByIds(
+          otherExtras,
+          request.organizationId
+        );
+
+        for (const item of serviceItems) {
+          const price = PricingDataService.penceToPounds(item.price_pence || 0);
+          breakdown.serviceItemFees += price;
+          breakdown.details.push({
+            component: 'service_item',
+            amount: price,
+            description: `${item.name || item.id} (${item.id})`
+          });
+        }
+      } catch (error) {
+        console.error('Failed to load service items:', error);
+        // Don't fail entire pricing, just log and continue
+      }
     }
   }
 
@@ -272,10 +287,10 @@ export class FeeCalculators {
    */
   static async applyMultipliers(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
     const dateTime = new Date(request.dateTime);
-    
+
     // Get time rules to determine time period config
     const timeRules = await PricingDataService.getTimeRules();
-    
+
     // Build time period config from rules
     const timePeriodConfig: any = {};
     timeRules.forEach(rule => {
@@ -291,18 +306,18 @@ export class FeeCalculators {
         };
       }
     });
-    
+
     const timePeriod = PricingHelpers.getTimePeriod(dateTime, timePeriodConfig);
-    
+
     // Find the multiplier for this period
     const rule = timeRules.find(r => r.rule_name === timePeriod);
     const multiplier = rule ? parseFloat(rule.multiplier) : 1.0;
-    
+
     if (multiplier !== 1.0) {
       const multiplierAmount = breakdown.subtotal * (multiplier - 1);
       breakdown.multipliers[timePeriod] = multiplier;
       breakdown.subtotal += multiplierAmount;
-      
+
       breakdown.details.push({
         component: 'time_multiplier',
         amount: multiplierAmount,
@@ -318,19 +333,19 @@ export class FeeCalculators {
   static async applyDiscounts(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
     if (request.corporateTier) {
       const discounts = await PricingDataService.getCorporateDiscounts();
-      
+
       let discountRate = 0;
-      
+
       if (request.corporateTier === 'tier1') {
         discountRate = discounts.tier1;
       } else if (request.corporateTier === 'tier2') {
         discountRate = discounts.tier2;
       }
-      
+
       if (discountRate > 0) {
         const discountAmount = breakdown.subtotal * discountRate;
         breakdown.discounts += discountAmount;
-        
+
         breakdown.details.push({
           component: 'corporate_discount',
           amount: -discountAmount,
@@ -350,13 +365,13 @@ export class FeeCalculators {
       request.bookingType,
       request.organizationId
     );
-    
+
     const minimumFare = PricingDataService.penceToPounds(rates.minimum_fare_pence);
-    
+
     if (breakdown.subtotal < minimumFare) {
       const adjustment = minimumFare - breakdown.subtotal;
       breakdown.subtotal = minimumFare;
-      
+
       breakdown.details.push({
         component: 'minimum_fare',
         amount: adjustment,
@@ -371,13 +386,13 @@ export class FeeCalculators {
    */
   static async calculateDistanceFeeForVehicle(distanceMiles: number, vehicleType: VehicleType, bookingType: BookingType): Promise<number> {
     const rates = await PricingDataService.getVehicleRates(vehicleType, bookingType);
-    
+
     const first6miles = Math.min(distanceMiles, 6);
     const remaining = Math.max(distanceMiles - 6, 0);
-    
+
     const perMileRate1 = PricingDataService.penceToPounds(rates.per_mile_first_6_pence);
     const perMileRate2 = PricingDataService.penceToPounds(rates.per_mile_after_6_pence);
-    
+
     return (first6miles * perMileRate1) + (remaining * perMileRate2);
   }
 }
