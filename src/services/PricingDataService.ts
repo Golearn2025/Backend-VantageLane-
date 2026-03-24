@@ -498,6 +498,38 @@ export class PricingDataService {
   }
 
   /**
+   * Get current pricing version ID
+   */
+  static async getCurrentPricingVersionId(): Promise<string> {
+    const version = await this.getActivePricingVersion();
+    return version.id;
+  }
+
+  /**
+   * Get multi-stop policy
+   * Returns fee per additional stop
+   */
+  static async getMultiStopPolicy(vehicleType: string, organizationId?: string): Promise<{ fee_per_stop_pence: number }> {
+    // Multi-stop fee is typically flat rate, not vehicle-specific
+    // Default: £15 per stop (1500 pence)
+    return {
+      fee_per_stop_pence: 1500
+    };
+  }
+
+  /**
+   * Get return discount policy
+   * Returns discount percentage for return bookings
+   */
+  static async getReturnDiscountPolicy(vehicleType: string, organizationId?: string): Promise<{ discount_percentage: number } | null> {
+    // Return discount policy: typically 10-15% off for round trips
+    // Default: 10% discount
+    return {
+      discount_percentage: 10
+    };
+  }
+
+  /**
    * Convert pence to pounds
    */
   static penceToPounds(pence: number): number {

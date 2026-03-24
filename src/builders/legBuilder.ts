@@ -49,14 +49,13 @@ export function buildOneWayLeg(
 }
 
 /**
- * Build operational legs for RETURN booking
- * Returns 2 legs: outbound (main) + return
+ * Build 2 operational legs for RETURN booking
  */
 export function buildReturnLegs(
   request: NormalizedReturnRequest,
   outboundRoute: NormalizedRoute,
   returnRoute: NormalizedRoute
-): OperationalLeg[] {
+): { outboundLeg: OperationalLeg; returnLeg: OperationalLeg } {
   const outboundLeg: OperationalLeg = {
     legNumber: 1,
     legKind: 'main',
@@ -79,7 +78,7 @@ export function buildReturnLegs(
     route: returnRoute,
   };
 
-  return [outboundLeg, returnLeg];
+  return { outboundLeg, returnLeg };
 }
 
 /**

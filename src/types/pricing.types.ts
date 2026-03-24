@@ -38,6 +38,11 @@ export enum TimePeriod {
   WEEKEND = 'weekend'
 }
 
+export enum LegKind {
+  MAIN = 'main',
+  RETURN = 'return'
+}
+
 export interface Coordinates {
   lat: number;
   lng: number;
@@ -137,8 +142,8 @@ export interface NormalizedReturnRequest {
   returnPickup: TripPoint;
   returnDropoff: TripPoint;
   returnAdditionalStops: TripPoint[];
-  distance?: number;
-  duration?: number;
+  distance?: number; // Optional: outbound distance hint
+  duration?: number; // Optional: outbound duration hint
   extras: string[];
   organizationId?: string;
 }

@@ -15,13 +15,15 @@ import {
   PricingResult,
   VehicleType,
   NormalizedPricingRequest,
-  NormalizedOneWayRequest
+  NormalizedOneWayRequest,
+  NormalizedReturnRequest
 } from '../types/pricing.types';
 import { PricingHelpers } from '../utils/PricingHelpers';
 import { BookingTypeHandlers } from './BookingTypeHandlers';
 import { FeeCalculators } from './FeeCalculators';
 import { PricingDataService } from './PricingDataService';
 import { handleOneWayPricing } from '../handlers/oneWayPricingHandler';
+import { handleReturnPricing } from '../handlers/returnPricingHandler';
 
 export class PricingEngine {
 
@@ -30,7 +32,7 @@ export class PricingEngine {
    * 
    * MIGRATION STATUS:
    * - ONE_WAY: Uses new handleOneWayPricing() ✅
-   * - RETURN: Legacy flow (TODO: migrate)
+   * - RETURN: Uses new handleReturnPricing() ✅
    * - HOURLY: Legacy flow (TODO: migrate)
    * - DAILY: Legacy flow (TODO: migrate)
    * - FLEET: Legacy flow (TODO: migrate)
@@ -41,6 +43,13 @@ export class PricingEngine {
       if (request.bookingType === BookingType.ONE_WAY) {
         return await handleOneWayPricing({
           request: request as NormalizedOneWayRequest
+        });
+      }
+
+      // NEW FLOW: RETURN uses dedicated handler
+      if (request.bookingType === BookingType.RETURN) {
+        return await handleReturnPricing({
+          request: request as NormalizedReturnRequest
         });
       }
 
