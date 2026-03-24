@@ -13,22 +13,43 @@ import {
   PricingBreakdownData,
   PricingRequestData,
   PricingResult,
-  VehicleType
+  VehicleType,
+  NormalizedPricingRequest,
+  NormalizedOneWayRequest
 } from '../types/pricing.types';
 import { PricingHelpers } from '../utils/PricingHelpers';
 import { BookingTypeHandlers } from './BookingTypeHandlers';
 import { FeeCalculators } from './FeeCalculators';
 import { PricingDataService } from './PricingDataService';
+import { handleOneWayPricing } from '../handlers/oneWayPricingHandler';
 
 export class PricingEngine {
 
   /**
    * Main method to calculate pricing
+   * 
+   * MIGRATION STATUS:
+   * - ONE_WAY: Uses new handleOneWayPricing() ✅
+   * - RETURN: Legacy flow (TODO: migrate)
+   * - HOURLY: Legacy flow (TODO: migrate)
+   * - DAILY: Legacy flow (TODO: migrate)
+   * - FLEET: Legacy flow (TODO: migrate)
    */
-  public static async calculate(request: PricingRequestData): Promise<PricingResult> {
+  public static async calculate(request: NormalizedPricingRequest): Promise<PricingResult> {
     try {
+      // NEW FLOW: ONE_WAY uses dedicated handler
+      if (request.bookingType === BookingType.ONE_WAY) {
+        return await handleOneWayPricing({
+          request: request as NormalizedOneWayRequest
+        });
+      }
+
+      // LEGACY FLOW: Other booking types (temporary until migrated)
+      // Convert NormalizedPricingRequest back to legacy PricingRequestData
+      const legacyRequest = this.convertToLegacyRequest(request);
+
       // Validate request
-      const validationError = this.validateRequest(request);
+      const validationError = this.validateRequest(legacyRequest);
       if (validationError) {
         return this.createErrorResponse(validationError, 400);
       }
@@ -49,57 +70,62 @@ export class PricingEngine {
         serviceItemFees: 0,
         subtotal: 0,
         multipliers: {},
-        discounts: 0,
+        discounts: {
+          total: 0,
+          returnDiscount: undefined,
+          fleetDiscount: undefined,
+          corporateDiscount: undefined
+        },
         finalPrice: 0,
         details: []
       };
 
       // Step 1: Base fare (NOT for hourly/daily bookings - those are flat rate)
-      if (request.bookingType !== BookingType.HOURLY && request.bookingType !== BookingType.DAILY) {
-        await FeeCalculators.calculateBaseFare(breakdown, request);
+      if (legacyRequest.bookingType !== BookingType.HOURLY && legacyRequest.bookingType !== BookingType.DAILY) {
+        await FeeCalculators.calculateBaseFare(breakdown, legacyRequest);
         // Capture pricing_version_id from vehicle rates
         const rates = await PricingDataService.getVehicleRates(
-          request.vehicleType,
-          request.bookingType,
-          request.organizationId
+          legacyRequest.vehicleType,
+          legacyRequest.bookingType,
+          legacyRequest.organizationId
         );
         pricingVersionId = rates.pricing_version_id;
       }
 
       // Step 2: Calculate main fare (distance/time vs hourly vs daily)
-      if (request.bookingType === BookingType.HOURLY) {
-        await FeeCalculators.calculateHourlyFee(breakdown, request);
+      if (legacyRequest.bookingType === BookingType.HOURLY) {
+        await FeeCalculators.calculateHourlyFee(breakdown, legacyRequest);
         // Capture pricing_version_id from hourly rules
         const hourlyRules = await PricingDataService.getHourlyRules(
-          request.vehicleType,
-          request.organizationId
+          legacyRequest.vehicleType,
+          legacyRequest.organizationId
         );
         pricingVersionId = hourlyRules.pricing_version_id;
-      } else if (request.bookingType === BookingType.DAILY) {
-        await FeeCalculators.calculateDailyFee(breakdown, request);
+      } else if (legacyRequest.bookingType === BookingType.DAILY) {
+        await FeeCalculators.calculateDailyFee(breakdown, legacyRequest);
         // Capture pricing_version_id from daily rules
         const dailyRules = await PricingDataService.getDailyRules(
-          request.vehicleType,
-          request.organizationId
+          legacyRequest.vehicleType,
+          legacyRequest.organizationId
         );
         pricingVersionId = dailyRules.pricing_version_id;
       } else {
-        if (request.distance) {
-          await FeeCalculators.calculateDistanceFee(breakdown, request);
+        if (legacyRequest.distance != null) {
+          await FeeCalculators.calculateDistanceFee(breakdown, legacyRequest);
         }
-        if (request.duration) {
-          await FeeCalculators.calculateTimeFee(breakdown, request);
+        if (legacyRequest.duration != null) {
+          await FeeCalculators.calculateTimeFee(breakdown, legacyRequest);
         }
       }
 
       // Step 3: Zone fees (airports, congestion)
-      await FeeCalculators.calculateZoneFees(breakdown, request);
+      await FeeCalculators.calculateZoneFees(breakdown, legacyRequest);
 
       // Step 4: Toll roads detection
-      await FeeCalculators.calculateTollFees(breakdown, request);
+      await FeeCalculators.calculateTollFees(breakdown, legacyRequest);
 
       // Step 5: Additional services
-      await FeeCalculators.calculateAdditionalServices(breakdown, request);
+      await FeeCalculators.calculateAdditionalServices(breakdown, legacyRequest);
 
       // Calculate subtotal before booking type logic
       breakdown.subtotal =
@@ -114,26 +140,26 @@ export class PricingEngine {
         breakdown.serviceItemFees;
 
       // Step 6: Apply booking type specific logic (RETURN or FLEET)
-      if (request.bookingType === BookingType.RETURN) {
-        await BookingTypeHandlers.applyReturnTripLogic(breakdown, request);
-      } else if (request.bookingType === BookingType.FLEET) {
-        await BookingTypeHandlers.applyFleetLogic(breakdown, request);
+      if (legacyRequest.bookingType === BookingType.RETURN) {
+        await BookingTypeHandlers.applyReturnTripLogic(breakdown, legacyRequest);
+      } else if (legacyRequest.bookingType === BookingType.FLEET) {
+        await BookingTypeHandlers.applyFleetLogic(breakdown, legacyRequest);
       }
 
       // Step 7: Apply time-based multipliers (only for non-hourly/daily bookings)
-      if (request.bookingType !== BookingType.HOURLY && request.bookingType !== BookingType.DAILY) {
-        await FeeCalculators.applyMultipliers(breakdown, request);
+      if (legacyRequest.bookingType !== BookingType.HOURLY && legacyRequest.bookingType !== BookingType.DAILY) {
+        await FeeCalculators.applyMultipliers(breakdown, legacyRequest);
       }
 
       // Step 8: Apply corporate discounts
-      await FeeCalculators.applyDiscounts(breakdown, request);
+      await FeeCalculators.applyDiscounts(breakdown, legacyRequest);
 
       // Step 9: Apply minimum fare
-      await FeeCalculators.applyMinimumFare(breakdown, request);
+      await FeeCalculators.applyMinimumFare(breakdown, legacyRequest);
 
       // Step 10: Apply rounding policy
       const roundingRules = await PricingDataService.getRoundingRules();
-      const priceBeforeRounding = breakdown.finalPrice || (breakdown.subtotal - breakdown.discounts);
+      const priceBeforeRounding = breakdown.finalPrice || (breakdown.subtotal - breakdown.discounts.total);
       breakdown.finalPrice = PricingHelpers.applyRounding(
         priceBeforeRounding,
         {
@@ -142,7 +168,7 @@ export class PricingEngine {
         }
       );
 
-      return this.createSuccessResponse(breakdown, request, pricingVersionId);
+      return this.createSuccessResponse(breakdown, legacyRequest, pricingVersionId);
 
     } catch (error: any) {
       console.error('Pricing calculation error:', error);
@@ -154,30 +180,120 @@ export class PricingEngine {
   }
 
   /**
-   * Validate pricing request
+   * Convert NormalizedPricingRequest to legacy PricingRequestData
+   * 
+   * CRITICAL: Legacy FeeCalculators expect frontend-like TripPointInput objects,
+   * not the normalized TripPoint format. We convert TripPoint → TripPointInput here.
+   * 
+   * TODO: Remove this when all booking types are migrated to new handlers
+   */
+  private static convertToLegacyRequest(request: NormalizedPricingRequest): PricingRequestData {
+    // Helper: Convert TripPoint to TripPointInput
+    const toTripPointInput = (tp: any | undefined): any | undefined => {
+      if (!tp) return tp;
+      // If already a simple object or string, return as-is
+      if (typeof tp === 'string') return tp;
+      // Convert TripPoint to TripPointInput format
+      return {
+        placeId: tp.placeId,
+        address: tp.address,
+        // Only include coordinates if both lat and lng are valid numbers
+        coordinates:
+          tp.coordinates &&
+            tp.coordinates.lat != null &&
+            tp.coordinates.lng != null
+            ? [tp.coordinates.lat, tp.coordinates.lng]
+            : undefined,
+        type: tp.type
+      };
+    };
+
+    // Base fields common to all types
+    const base: any = {
+      bookingType: request.bookingType,
+      dateTime: request.dateTime,
+      pickup: toTripPointInput(request.pickup),
+      extras: request.extras,
+      organizationId: request.organizationId
+    };
+
+    // Add type-specific fields
+    switch (request.bookingType) {
+      case BookingType.RETURN:
+        return {
+          ...base,
+          vehicleType: request.vehicleType,
+          dropoff: toTripPointInput(request.dropoff),
+          additionalStops: request.additionalStops?.map(toTripPointInput) || [],
+          returnDateTime: request.returnDateTime,
+          returnPickup: toTripPointInput(request.returnPickup),
+          returnDropoff: toTripPointInput(request.returnDropoff),
+          returnAdditionalStops: request.returnAdditionalStops?.map(toTripPointInput) || [],
+          distance: request.distance,
+          duration: request.duration
+        };
+      case BookingType.HOURLY:
+        return {
+          ...base,
+          vehicleType: request.vehicleType,
+          dropoff: toTripPointInput(request.dropoff),
+          hours: request.hours
+        };
+      case BookingType.DAILY:
+        return {
+          ...base,
+          vehicleType: request.vehicleType,
+          dropoff: toTripPointInput(request.dropoff),
+          days: request.days
+        };
+      case BookingType.FLEET:
+        return {
+          ...base,
+          dropoff: toTripPointInput(request.dropoff),
+          additionalStops: request.additionalStops?.map(toTripPointInput) || [],
+          fleetConfig: request.fleetConfig,
+          distance: request.distance,
+          duration: request.duration
+        };
+      default:
+        return base as PricingRequestData;
+    }
+  }
+
+  /**
+   * Validate pricing request (legacy)
+   * TODO: Remove when all types use new validators
    */
   private static validateRequest(request: PricingRequestData): string | null {
-    if (!request.vehicleType) {
-      return 'Vehicle type is required';
-    }
-
     if (!request.bookingType) {
       return 'Booking type is required';
-    }
-
-    if (!Object.values(VehicleType).includes(request.vehicleType)) {
-      return `Invalid vehicle type: ${request.vehicleType}`;
     }
 
     if (!Object.values(BookingType).includes(request.bookingType)) {
       return `Invalid booking type: ${request.bookingType}`;
     }
 
-    if (request.bookingType === BookingType.HOURLY && !request.hours) {
+    // Reject BESPOKE - not supported by pricing engine
+    if (request.bookingType === BookingType.BESPOKE) {
+      return 'BESPOKE bookings are not supported by pricing engine';
+    }
+
+    // Vehicle type required for non-FLEET bookings
+    if (request.bookingType !== BookingType.FLEET) {
+      if (!request.vehicleType) {
+        return 'Vehicle type is required';
+      }
+      if (!Object.values(VehicleType).includes(request.vehicleType)) {
+        return `Invalid vehicle type: ${request.vehicleType}`;
+      }
+    }
+
+    // Type-specific validations
+    if (request.bookingType === BookingType.HOURLY && request.hours == null) {
       return 'Hours are required for hourly bookings';
     }
 
-    if (request.bookingType === BookingType.DAILY && !request.days) {
+    if (request.bookingType === BookingType.DAILY && request.days == null) {
       return 'Days are required for daily bookings';
     }
 
@@ -201,18 +317,7 @@ export class PricingEngine {
       finalPrice: breakdown.finalPrice,
       currency: 'GBP',
       pricing_version_id: pricingVersionId,
-      breakdown: {
-        baseFare: breakdown.baseFare,
-        distanceFee: breakdown.distanceFee,
-        timeFee: breakdown.timeFee,
-        additionalFees: breakdown.airportFees + breakdown.zoneFees + breakdown.tollFees,
-        services: breakdown.multiStopFees + breakdown.serviceItemFees,
-        subtotal: breakdown.subtotal,
-        multipliers: breakdown.multipliers,
-        discounts: breakdown.discounts,
-        finalPrice: breakdown.finalPrice
-      },
-      details: breakdown.details,
+      bookingBreakdown: breakdown,
       timestamp: new Date().toISOString()
     };
 
@@ -234,7 +339,7 @@ export class PricingEngine {
         breakdown.finalPrice
       );
       result.legs = legs;
-      result.fleet_summary = summary;
+      result.fleetSummary = summary;
     }
 
     return result;

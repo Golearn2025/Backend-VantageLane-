@@ -38,9 +38,9 @@ export class QuoteService {
       console.log('🎯 Creating independent quote for organization:', organizationId);
 
       // Calculate pricing totals from actual breakdown (FIXED for consistency)
-      const breakdown = pricingResult.breakdown;
+      const breakdown = pricingResult.bookingBreakdown;
       const subtotalPence = Math.round((breakdown?.subtotal || 0) * 100);
-      const discountPence = Math.round((breakdown?.discounts || 0) * 100);
+      const discountPence = Math.round((breakdown?.discounts?.total || 0) * 100);
 
       // CRITICAL FIX: Use PricingEngine.finalPrice for consistency with API response
       const totalPence = Math.round((pricingResult.finalPrice || 0) * 100);
@@ -55,9 +55,11 @@ export class QuoteService {
         ((breakdown?.baseFare || 0) +
           (breakdown?.distanceFee || 0) +
           (breakdown?.timeFee || 0) +
-          (breakdown?.additionalFees || 0)) * 100  // Include additionalFees like existing code
+          (breakdown?.airportFees || 0) +
+          (breakdown?.zoneFees || 0) +
+          (breakdown?.tollFees || 0)) * 100
       );
-      const servicesSubtotalPence = Math.round((breakdown?.services || 0) * 100);
+      const servicesSubtotalPence = Math.round((breakdown?.serviceItemFees || 0) * 100);
 
       const vehicleDiscountPence = 0; // No separate vehicle discount yet
       const servicesDiscountPence = 0; // No separate services discount yet
@@ -90,16 +92,17 @@ export class QuoteService {
           // Line items as JSONB with Phase 2A trip metadata
           line_items: {
             components: [
-              { code: 'base_fare', label: 'Base fare', amount_pence: Math.round((pricingResult.breakdown?.baseFare || 0) * 100) },
-              { code: 'distance_fee', label: 'Distance fee', amount_pence: Math.round((pricingResult.breakdown?.distanceFee || 0) * 100) },
-              { code: 'time_fee', label: 'Time fee', amount_pence: Math.round((pricingResult.breakdown?.timeFee || 0) * 100) },
-              { code: 'additional_fees', label: 'Additional fees', amount_pence: Math.round((pricingResult.breakdown?.additionalFees || 0) * 100) },
-              { code: 'service_item_fees', label: 'Service Item Fees', amount_pence: Math.round((pricingResult.breakdown?.services || 0) * 100) }
+              { code: 'base_fare', label: 'Base fare', amount_pence: Math.round((pricingResult.bookingBreakdown?.baseFare || 0) * 100) },
+              { code: 'distance_fee', label: 'Distance fee', amount_pence: Math.round((pricingResult.bookingBreakdown?.distanceFee || 0) * 100) },
+              { code: 'time_fee', label: 'Time fee', amount_pence: Math.round((pricingResult.bookingBreakdown?.timeFee || 0) * 100) },
+              { code: 'airport_fees', label: 'Airport fees', amount_pence: Math.round((pricingResult.bookingBreakdown?.airportFees || 0) * 100) },
+              { code: 'multi_stop_fees', label: 'Multi-stop fees', amount_pence: Math.round((pricingResult.bookingBreakdown?.multiStopFees || 0) * 100) },
+              { code: 'service_item_fees', label: 'Service Item Fees', amount_pence: Math.round((pricingResult.bookingBreakdown?.serviceItemFees || 0) * 100) }
             ].filter(c => c.amount_pence > 0),
-            discounts: (pricingResult.breakdown?.discounts || 0) > 0
-              ? [{ code: 'discount', label: 'Discount', amount_pence: Math.round((pricingResult.breakdown?.discounts || 0) * 100) }]
+            discounts: (pricingResult.bookingBreakdown?.discounts?.total || 0) > 0
+              ? [{ code: 'discount', label: 'Discount', amount_pence: Math.round((pricingResult.bookingBreakdown?.discounts?.total || 0) * 100) }]
               : [],
-            multipliers: Object.entries(pricingResult.breakdown?.multipliers || {}).map(([code, factor]) => ({
+            multipliers: Object.entries(pricingResult.bookingBreakdown?.multipliers || {}).map(([code, factor]) => ({
               code,
               label: code.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
               factor: factor as number
@@ -264,7 +267,7 @@ export class QuoteService {
         discount_pence: 0,
         vat_rate: 0.20,
         vat_pence: Math.round((leg.pricing?.subtotal || 0) * 100 * 0.20),
-        total_pence: Math.round((leg.pricing?.leg_price || leg.pricing?.subtotal || 0) * 100),
+        total_pence: Math.round((leg.pricing?.finalPrice || leg.pricing?.subtotal || 0) * 100),
 
         line_items: {
           components: [
@@ -282,7 +285,7 @@ export class QuoteService {
             subtotal_pence: Math.round((leg.pricing?.subtotal || 0) * 100),
             discount_pence: 0,
             vat_pence: Math.round((leg.pricing?.subtotal || 0) * 100 * 0.20),
-            total_pence: Math.round((leg.pricing?.leg_price || leg.pricing?.subtotal || 0) * 100)
+            total_pence: Math.round((leg.pricing?.finalPrice || leg.pricing?.subtotal || 0) * 100)
           },
           meta: {
             calc_source: 'pricing_engine_v2',
@@ -317,21 +320,23 @@ export class QuoteService {
     organizationId: string,
     bookingId: string
   ): Promise<string> {
-    const subtotalPence = Math.round((pricingResult.breakdown?.subtotal || pricingResult.finalPrice || 0) * 100);
-    const discountPence = Math.round((pricingResult.breakdown?.discounts || 0) * 100);
+    const subtotalPence = Math.round((pricingResult.bookingBreakdown?.subtotal || pricingResult.finalPrice || 0) * 100);
+    const discountPence = Math.round((pricingResult.bookingBreakdown?.discounts?.total || 0) * 100);
     const vatRate = 0.20;
     const vatPence = Math.round(subtotalPence * vatRate);
     const totalPence = subtotalPence + vatPence - discountPence;
 
     // Calculate vehicle vs services split
     const vehicleSubtotalPence = Math.round((
-      (pricingResult.breakdown?.baseFare || 0) +
-      (pricingResult.breakdown?.distanceFee || 0) +
-      (pricingResult.breakdown?.timeFee || 0) +
-      (pricingResult.breakdown?.additionalFees || 0)
+      (pricingResult.bookingBreakdown?.baseFare || 0) +
+      (pricingResult.bookingBreakdown?.distanceFee || 0) +
+      (pricingResult.bookingBreakdown?.timeFee || 0) +
+      (pricingResult.bookingBreakdown?.airportFees || 0) +
+      (pricingResult.bookingBreakdown?.zoneFees || 0) +
+      (pricingResult.bookingBreakdown?.tollFees || 0)
     ) * 100);
 
-    const servicesSubtotalPence = Math.round((pricingResult.breakdown?.services || 0) * 100);
+    const servicesSubtotalPence = Math.round((pricingResult.bookingBreakdown?.serviceItemFees || 0) * 100);
 
     const vehicleDiscountPence = 0; // No separate vehicle discount yet
     const servicesDiscountPence = 0; // No separate services discount yet
@@ -363,17 +368,19 @@ export class QuoteService {
         // Line items as JSONB
         line_items: {
           components: [
-            { code: 'base_fare', label: 'Base fare', amount_pence: Math.round((pricingResult.breakdown?.baseFare || 0) * 100) },
-            { code: 'distance_fee', label: 'Distance fee', amount_pence: Math.round((pricingResult.breakdown?.distanceFee || 0) * 100) },
-            { code: 'time_fee', label: 'Time fee', amount_pence: Math.round((pricingResult.breakdown?.timeFee || 0) * 100) },
-            // NOTE: additional_fees is aggregated (airport+zone+toll) because pricingResult.breakdown doesn't have them separated
-            { code: 'additional_fees', label: 'Additional fees', amount_pence: Math.round((pricingResult.breakdown?.additionalFees || 0) * 100) },
-            { code: 'service_item_fees', label: 'Service Item Fees', amount_pence: Math.round((pricingResult.breakdown?.services || 0) * 100) }
+            { code: 'base_fare', label: 'Base fare', amount_pence: Math.round((pricingResult.bookingBreakdown?.baseFare || 0) * 100) },
+            { code: 'distance_fee', label: 'Distance fee', amount_pence: Math.round((pricingResult.bookingBreakdown?.distanceFee || 0) * 100) },
+            { code: 'time_fee', label: 'Time fee', amount_pence: Math.round((pricingResult.bookingBreakdown?.timeFee || 0) * 100) },
+            { code: 'airport_fees', label: 'Airport fees', amount_pence: Math.round((pricingResult.bookingBreakdown?.airportFees || 0) * 100) },
+            { code: 'zone_fees', label: 'Zone fees', amount_pence: Math.round((pricingResult.bookingBreakdown?.zoneFees || 0) * 100) },
+            { code: 'toll_fees', label: 'Toll fees', amount_pence: Math.round((pricingResult.bookingBreakdown?.tollFees || 0) * 100) },
+            { code: 'multi_stop_fees', label: 'Multi-stop fees', amount_pence: Math.round((pricingResult.bookingBreakdown?.multiStopFees || 0) * 100) },
+            { code: 'service_item_fees', label: 'Service Item Fees', amount_pence: Math.round((pricingResult.bookingBreakdown?.serviceItemFees || 0) * 100) }
           ].filter(c => c.amount_pence > 0),
-          discounts: (pricingResult.breakdown?.discounts || 0) > 0
-            ? [{ code: 'discount', label: 'Discount', amount_pence: Math.round((pricingResult.breakdown?.discounts || 0) * 100) }]
+          discounts: (pricingResult.bookingBreakdown?.discounts?.total || 0) > 0
+            ? [{ code: 'discount', label: 'Discount', amount_pence: Math.round((pricingResult.bookingBreakdown?.discounts?.total || 0) * 100) }]
             : [],
-          multipliers: Object.entries(pricingResult.breakdown?.multipliers || {}).map(([code, factor]) => ({
+          multipliers: Object.entries(pricingResult.bookingBreakdown?.multipliers || {}).map(([code, factor]) => ({
             code,
             label: code.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
             factor: factor as number

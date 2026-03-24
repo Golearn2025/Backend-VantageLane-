@@ -6,10 +6,9 @@
 
 import { Request, Response } from 'express';
 import Stripe from 'stripe';
-import { WebhookService } from '../../services/WebhookService';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-06-20'
+  apiVersion: '2026-02-25.clover'
 });
 
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
@@ -37,32 +36,43 @@ export async function handleStripeWebhook(req: Request, res: Response) {
 
     console.log(`🔔 Webhook received: ${event.type} (${event.id})`);
 
-    // 2. Check for duplicate processing
-    const existingEvent = await WebhookService.checkEventProcessed(event.id);
-    if (existingEvent) {
-      console.log(`⚠️ Webhook: Event ${event.id} already processed`);
-      return res.status(200).json({ received: true, duplicate: true });
-    }
+    // TODO: Implement WebhookService for event processing and deduplication
+    // For now, just acknowledge receipt
+    console.log(`⚠️ Webhook: Event processing not yet implemented - event ${event.id}`);
 
-    // 3. Process event with proper deduplication
-    const result = await WebhookService.processEventWithDeduplication(event);
+    return res.status(200).json({
+      received: true,
+      processed: false,
+      event_type: event.type,
+      message: 'Webhook received but processing not yet implemented'
+    });
 
-    if (result.success) {
-      console.log(`✅ Webhook: Successfully processed ${event.type}`);
-      return res.status(200).json({
-        received: true,
-        processed: true,
-        event_type: event.type,
-        result: result.data
-      });
-    } else {
-      console.error(`❌ Webhook: Failed to process ${event.type}:`, result.error);
-      return res.status(500).json({
-        received: true,
-        processed: false,
-        error: result.error
-      });
-    }
+    // 2. Check for duplicate processing (TODO: implement WebhookService)
+    // const existingEvent = await WebhookService.checkEventProcessed(event.id);
+    // if (existingEvent) {
+    //   console.log(`⚠️ Webhook: Event ${event.id} already processed`);
+    //   return res.status(200).json({ received: true, duplicate: true });
+    // }
+
+    // 3. Process event with proper deduplication (TODO: implement WebhookService)
+    // const result = await WebhookService.processEventWithDeduplication(event);
+    //
+    // if (result.success) {
+    //   console.log(`✅ Webhook: Successfully processed ${event.type}`);
+    //   return res.status(200).json({
+    //     received: true,
+    //     processed: true,
+    //     event_type: event.type,
+    //     result: result.data
+    //   });
+    // } else {
+    //   console.error(`❌ Webhook: Failed to process ${event.type}:`, result.error);
+    //   return res.status(500).json({
+    //     received: true,
+    //     processed: false,
+    //     error: result.error
+    //   });
+    // }
 
   } catch (error) {
     console.error('❌ Webhook: Unexpected error:', error);

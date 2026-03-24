@@ -10,7 +10,7 @@ import { supabase } from '../config/supabase';
 
 // Initialize Stripe
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-06-20'
+  apiVersion: '2026-02-25.clover'
 });
 
 export interface CreatePaymentIntentParams {
@@ -99,7 +99,7 @@ export class PaymentService {
           paymentId: existingPayment.id,
           bookingId: existingPayment.booking_id,
           stripePaymentIntentId: existingPayment.stripe_payment_intent_id,
-          clientSecret, // Return actual client_secret if available
+          clientSecret: clientSecret ?? undefined, // Return actual client_secret if available
           amount: existingPayment.amount_pence,
           currency: existingPayment.currency,
           status: existingPayment.status,
@@ -119,7 +119,7 @@ export class PaymentService {
         paymentId: paymentRecord.id,
         bookingId: paymentRecord.booking_id,
         stripePaymentIntentId: stripeIntent.id,
-        clientSecret: stripeIntent.client_secret,
+        clientSecret: stripeIntent.client_secret ?? undefined,
         amount: stripeIntent.amount,
         currency: stripeIntent.currency,
         status: 'pending',

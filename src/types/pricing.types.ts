@@ -7,16 +7,28 @@ export enum VehicleType {
   EXECUTIVE = 'executive',
   LUXURY = 'luxury',
   SUV = 'suv',
-  VAN = 'mpv'
+  MPV = 'mpv'
 }
 
 export enum BookingType {
-  ONE_WAY = 'one_way',
+  ONE_WAY = 'oneway',
   RETURN = 'return',
   HOURLY = 'hourly',
   DAILY = 'daily',
-  FLEET = 'fleet'
+  FLEET = 'fleet',
+  BESPOKE = 'bespoke' // Note: BESPOKE out of scope for pricing engine, handled separately
 }
+
+/**
+ * Booking types supported by pricing engine
+ * BESPOKE excluded - handled by separate flow
+ */
+export type PricingEngineBookingType =
+  | BookingType.ONE_WAY
+  | BookingType.RETURN
+  | BookingType.HOURLY
+  | BookingType.DAILY
+  | BookingType.FLEET;
 
 export enum TimePeriod {
   DAY = 'day',
@@ -31,25 +43,149 @@ export interface Coordinates {
   lng: number;
 }
 
+/**
+ * Raw coordinates from frontend - accepts both tuple and object format
+ */
+export type RawCoordinates = [number, number] | { lat: number | null; lng: number | null };
+
+/**
+ * Input location data from frontend (before normalization)
+ * Accepts coordinates as tuple [lat, lng] or object { lat, lng }
+ */
+export interface TripPointInput {
+  placeId?: string | null;
+  address: string;
+  coordinates?: RawCoordinates;
+  type?: 'address' | 'airport' | 'hotel' | 'poi';
+}
+
+/**
+ * Normalized location data for trip points (after parsing)
+ * Used internally in pricing engine
+ */
+export interface TripPoint {
+  placeId?: string | null;
+  address: string;
+  coordinates?: Coordinates | null;
+  type?: 'address' | 'airport' | 'hotel' | 'poi';
+}
+
+/**
+ * Public pricing request data (accepts raw input from frontend)
+ * Parser will normalize this into strict internal types
+ */
 export interface PricingRequestData {
-  pickup: string;
-  dropoff: string;
-  vehicleType: VehicleType;
   bookingType: BookingType;
+  vehicleType?: VehicleType;
   dateTime: string;
+
+  // ONE_WAY & RETURN locations
+  pickup?: TripPointInput;
+  dropoff?: TripPointInput;
+  additionalStops?: TripPointInput[];
+
+  // RETURN specific
+  returnDateTime?: string;
+  returnPickup?: TripPointInput;
+  returnDropoff?: TripPointInput;
+  returnAdditionalStops?: TripPointInput[];
+
+  // HOURLY
+  hours?: number;
+
+  // DAILY
+  days?: number;
+
+  // FLEET
+  fleetConfig?: Partial<Record<VehicleType, number>>;
+
+  // Compatibility (not source of truth - backend may recompute)
   distance?: number;
   duration?: number;
-  hours?: number; // For hourly bookings
-  days?: number; // For daily bookings
-  coordinates?: {
-    pickup: Coordinates;
-    dropoff: Coordinates;
-  };
+
+  // Additional fields
   extras?: string[];
   corporateTier?: string;
-  fleetConfig?: Record<string, number>; // For fleet bookings
-  organizationId?: string; // Multi-tenant organization ID
+  organizationId?: string;
 }
+
+/**
+ * Normalized internal request types (after validation & parsing)
+ * Used by pricing handlers
+ */
+export interface NormalizedOneWayRequest {
+  bookingType: BookingType.ONE_WAY;
+  vehicleType: VehicleType;
+  dateTime: string;
+  pickup: TripPoint;
+  dropoff: TripPoint;
+  additionalStops: TripPoint[];
+  distance?: number;
+  duration?: number;
+  extras: string[];
+  organizationId?: string;
+}
+
+export interface NormalizedReturnRequest {
+  bookingType: BookingType.RETURN;
+  vehicleType: VehicleType;
+  dateTime: string;
+  pickup: TripPoint;
+  dropoff: TripPoint;
+  additionalStops: TripPoint[];
+  returnDateTime: string;
+  returnPickup: TripPoint;
+  returnDropoff: TripPoint;
+  returnAdditionalStops: TripPoint[];
+  distance?: number;
+  duration?: number;
+  extras: string[];
+  organizationId?: string;
+}
+
+export interface NormalizedHourlyRequest {
+  bookingType: BookingType.HOURLY;
+  vehicleType: VehicleType;
+  dateTime: string;
+  hours: number;
+  pickup: TripPoint;
+  dropoff?: TripPoint;
+  extras: string[];
+  organizationId?: string;
+}
+
+export interface NormalizedDailyRequest {
+  bookingType: BookingType.DAILY;
+  vehicleType: VehicleType;
+  dateTime: string;
+  days: number;
+  pickup: TripPoint;
+  dropoff?: TripPoint;
+  extras: string[];
+  organizationId?: string;
+}
+
+export interface NormalizedFleetRequest {
+  bookingType: BookingType.FLEET;
+  baseServiceType: BookingType.ONE_WAY | BookingType.HOURLY | BookingType.DAILY; // Fleet layer over base service
+  dateTime: string;
+  pickup: TripPoint;
+  dropoff: TripPoint;
+  additionalStops: TripPoint[];
+  fleetConfig: Partial<Record<VehicleType, number>>;
+  distance?: number;
+  duration?: number;
+  extras: string[];
+  organizationId?: string;
+}
+
+export type NormalizedPricingRequest =
+  | NormalizedOneWayRequest
+  | NormalizedReturnRequest
+  | NormalizedHourlyRequest
+  | NormalizedDailyRequest
+  | NormalizedFleetRequest;
+// BESPOKE intentionally excluded from pricing engine normalized flow
 
 export interface VehicleRates {
   base: number;
@@ -175,7 +311,12 @@ export interface PricingBreakdownData {
   serviceItemFees: number;
   subtotal: number;
   multipliers: Record<string, number>;
-  discounts: number;
+  discounts: {
+    total: number;
+    returnDiscount?: number;
+    fleetDiscount?: number;
+    corporateDiscount?: number;
+  };
   finalPrice: number;
   details: PricingDetail[];
 }
@@ -187,43 +328,51 @@ export interface PricingDetail {
 }
 
 /**
- * Leg breakdown for RETURN and FLEET bookings
+ * Operational leg breakdown for RETURN and FLEET bookings
+ * Aligned with DB booking_legs.leg_kind enum
  */
 export interface LegBreakdown {
   leg_number: number;
-  leg_type: 'outbound' | 'return' | 'vehicle'; // outbound/return for RETURN, vehicle for FLEET
-  vehicle_category?: string; // For FLEET: 'EXEC', 'LUX', 'SUV', 'VAN'
-  vehicle_index?: number; // For FLEET: 1, 2, 3... (which vehicle of this category)
-  pickup_location?: string;
-  destination?: string;
+  leg_kind: 'main' | 'return' | 'fleet_item'; // Aligned with DB enum
+  booking_leg_id?: string; // Real booking_legs.id - MUST exist before creating client_leg_quotes
+  vehicle_category?: VehicleType; // For FLEET
+  vehicle_unit_index?: number; // 1-based index of vehicle instance within booking/fleet expansion
+  pickup?: TripPoint;
+  dropoff?: TripPoint;
   scheduled_at?: string;
   distance_miles?: number;
   duration_min?: number;
+  stops?: TripPoint[]; // Additional stops for this leg
 
   // Pricing breakdown per leg
   pricing: {
     baseFare: number;
     distanceFee: number;
     timeFee: number;
+    multiStopFee: number;
+    waitingFees: number;
     airportFees: number;
     zoneFees: number;
     tollFees: number;
     serviceItemFees: number;
     subtotal: number;
-    leg_price: number; // Final price for this leg
+    multipliers: Record<string, number>;
+    discount: number; // Proportionally allocated discount
+    finalPrice: number; // Final price for this leg after discount
+    details: PricingDetail[];
   };
 
-  // Commission breakdown per leg
-  platform_fee: number;
-  operator_net: number;
-  driver_payout: number;
+  // Commission breakdown per leg (camelCase for TS consistency)
+  platformFee: number;
+  operatorNet: number;
+  driverPayout: number;
 }
 
 /**
  * Fleet summary per vehicle category
  */
 export interface FleetCategorySummary {
-  category: string; // 'EXEC', 'LUX', 'SUV', 'VAN'
+  category: VehicleType;
   count: number;
   unit_price: number;
   total: number;
@@ -231,27 +380,34 @@ export interface FleetCategorySummary {
 
 export interface PricingResult {
   success: boolean;
-  finalPrice?: number;
+  finalPrice?: number; // Shortcut/convenience - same as bookingBreakdown.finalPrice
   currency?: string;
   pricing_version_id?: string; // UUID of pricing version used
-  breakdown?: {
-    baseFare: number;
-    distanceFee: number;
-    timeFee: number;
-    additionalFees: number;
-    services: number;
-    subtotal: number;
-    multipliers: Record<string, number>;
-    discounts: number;
-    finalPrice: number;
-  };
-  details?: PricingDetail[];
 
-  // ✅ NEW: Legs breakdown for RETURN and FLEET
+  // Booking-level breakdown
+  bookingBreakdown?: PricingBreakdownData;
+
+  // Operational legs breakdown (for RETURN and FLEET)
   legs?: LegBreakdown[];
 
-  // ✅ NEW: Fleet summary (only for FLEET bookings)
-  fleet_summary?: FleetCategorySummary[];
+  // Fleet summary (only for FLEET bookings)
+  fleetSummary?: FleetCategorySummary[];
+
+  // Normalized route input (for auditability)
+  normalizedRoute?: {
+    bookingType?: BookingType;
+    dateTime?: string;
+    returnDateTime?: string;
+    pickup?: TripPoint;
+    additionalStops?: TripPoint[];
+    dropoff?: TripPoint;
+    returnPickup?: TripPoint;
+    returnAdditionalStops?: TripPoint[];
+    returnDropoff?: TripPoint;
+  };
+
+  // Legacy compatibility (deprecated - use bookingBreakdown)
+  details?: PricingDetail[];
 
   error?: string;
   code?: number;

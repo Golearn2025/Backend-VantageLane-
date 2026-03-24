@@ -14,43 +14,18 @@
  */
 
 import { Request, Response } from 'express';
-import { validationResult } from 'express-validator';
 import { PricingEngine } from '../../services/PricingEngine';
-import { QuoteService } from '../../services/QuoteService';
+import { QuotePersistenceService } from '../../services/quotes';
+import { validatePricingRequest } from '../../validators/pricingRequestValidator';
+import { parsePricingRequest } from '../../parsers/pricingRequestParser';
+import { PricingRequestData } from '../../types/pricing.types';
 
 export async function calculateAndQuote(req: Request, res: Response) {
   try {
-    console.log(' Phase 2A: Calculate and Quote request received');
+    console.log('🎯 Phase 2A: Calculate and Quote request received');
 
-    // Check validation results
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        error: 'Validation failed',
-        details: errors.array()
-      });
-    }
-
-    // Validate request body
-    const {
-      pickup,
-      dropoff,
-      vehicleType,
-      bookingType,
-      dateTime,
-      // Optional fields
-      distance,
-      duration,
-      hours,
-      days,
-      extras,
-      corporateTier
-    } = req.body;
-
-    // Get organizationId from authenticated context only
+    // Get organizationId from authenticated context
     const organizationId = (req as any).user?.organizationId;
-
     if (!organizationId) {
       return res.status(401).json({
         success: false,
@@ -58,31 +33,41 @@ export async function calculateAndQuote(req: Request, res: Response) {
       });
     }
 
-    // Required fields validation
-    if (!pickup || !dropoff || !vehicleType || !bookingType || !dateTime) {
+    // Build PricingRequestData from request body
+    const requestData: PricingRequestData = {
+      ...req.body,
+      organizationId // Inject from auth context
+    };
+
+    // Step 1: Validate request using new validator
+    console.log('✅ Validating pricing request...');
+    const validationResult = validatePricingRequest(requestData);
+    if (!validationResult.valid) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: pickup, dropoff, vehicleType, bookingType, dateTime'
+        error: 'Validation failed',
+        details: validationResult.errors
       });
     }
 
-    // Step 1: Calculate pricing using PricingEngine
-    console.log('📊 Calculating pricing...');
-    const pricingResult = await PricingEngine.calculate({
-      pickup,
-      dropoff,
-      vehicleType,
-      bookingType,
-      dateTime,
-      distance,
-      duration,
-      hours,
-      days,
-      extras,
-      corporateTier
-    });
+    // Step 2: Parse request into normalized format
+    console.log('🔄 Parsing pricing request...');
+    const parseResult = parsePricingRequest(requestData);
+    if (!parseResult.success || !parseResult.data) {
+      return res.status(400).json({
+        success: false,
+        error: 'Parse failed',
+        details: parseResult.errors
+      });
+    }
 
-    if (!pricingResult.success || !pricingResult.breakdown) {
+    const normalizedRequest = parseResult.data;
+
+    // Step 3: Calculate pricing using PricingEngine with normalized request
+    console.log('📊 Calculating pricing...');
+    const pricingResult = await PricingEngine.calculate(normalizedRequest);
+
+    if (!pricingResult.success || !pricingResult.bookingBreakdown) {
       return res.status(400).json({
         success: false,
         error: 'Pricing calculation failed',
@@ -93,14 +78,14 @@ export async function calculateAndQuote(req: Request, res: Response) {
     console.log('✅ Pricing calculated:', {
       finalPrice: pricingResult.finalPrice,
       currency: pricingResult.currency,
-      breakdown: pricingResult.breakdown
+      breakdown: pricingResult.bookingBreakdown
     });
 
-    // Step 2: Create independent quote (Phase 2A)
+    // Step 4: Create independent quote (Phase 2A)
     console.log('📝 Creating independent quote...');
-    const quoteResult = await QuoteService.createIndependentQuote(
+    const quoteResult = await QuotePersistenceService.createIndependentQuote(
       pricingResult,
-      req.body,
+      normalizedRequest,
       organizationId
     );
 
@@ -114,7 +99,7 @@ export async function calculateAndQuote(req: Request, res: Response) {
 
     console.log('✅ Independent quote created:', quoteResult.booking_quote_id);
 
-    // Step 3: Return success response
+    // Step 5: Return success response
     const response = {
       success: true,
       data: {
@@ -122,8 +107,9 @@ export async function calculateAndQuote(req: Request, res: Response) {
         pricing: {
           finalPrice: pricingResult.finalPrice,
           currency: pricingResult.currency || 'GBP',
-          breakdown: pricingResult.breakdown,
-          details: pricingResult.details
+          breakdown: pricingResult.bookingBreakdown,
+          legs: pricingResult.legs,
+          details: pricingResult.bookingBreakdown?.details
         },
         quote: {
           id: quoteResult.booking_quote_id,

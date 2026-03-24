@@ -162,9 +162,13 @@ export class FeeCalculators {
    * Reads from: v_pricing_airport_fees, v_pricing_zone_fees
    */
   static async calculateZoneFees(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
+    // Extract address strings from TripPointInput objects
+    const pickupAddress = typeof request.pickup === 'string' ? request.pickup : request.pickup?.address || '';
+    const dropoffAddress = typeof request.dropoff === 'string' ? request.dropoff : request.dropoff?.address || '';
+
     // Airport fees
-    const pickupAirport = PricingHelpers.detectAirport(request.pickup);
-    const dropoffAirport = PricingHelpers.detectAirport(request.dropoff);
+    const pickupAirport = PricingHelpers.detectAirport(pickupAddress);
+    const dropoffAirport = PricingHelpers.detectAirport(dropoffAddress);
 
     if (pickupAirport) {
       const airportFee = await PricingDataService.getAirportFee(pickupAirport);
@@ -193,7 +197,7 @@ export class FeeCalculators {
     }
 
     // Congestion and zone fees
-    const zones = PricingHelpers.detectZones(request.pickup, request.dropoff);
+    const zones = PricingHelpers.detectZones(pickupAddress, dropoffAddress);
     for (const zone of zones) {
       const zoneFee = await PricingDataService.getZoneFee(zone);
       if (zoneFee) {
@@ -213,8 +217,12 @@ export class FeeCalculators {
    * Reads from: v_pricing_zone_fees (tolls are stored as zone_type='toll')
    */
   static async calculateTollFees(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
+    // Extract address strings from TripPointInput objects
+    const pickupAddress = typeof request.pickup === 'string' ? request.pickup : request.pickup?.address || '';
+    const dropoffAddress = typeof request.dropoff === 'string' ? request.dropoff : request.dropoff?.address || '';
+
     // Detect toll roads from addresses (keyword-based)
-    const addresses = [request.pickup.toLowerCase(), request.dropoff.toLowerCase()];
+    const addresses = [pickupAddress.toLowerCase(), dropoffAddress.toLowerCase()];
     const tollKeywords = {
       'dartford': 'dartford',
       'm6 toll': 'm6_toll'
