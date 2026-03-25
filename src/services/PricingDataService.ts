@@ -530,6 +530,36 @@ export class PricingDataService {
   }
 
   /**
+   * Get fleet discounts
+   * Reads from: pricing_fleet_discounts
+   * Returns array of fleet discount tiers (e.g., 5% for 3+ vehicles, 10% for 5+ vehicles)
+   */
+  static async getFleetDiscounts(organizationId?: string): Promise<Array<{ min_vehicles: number; discount_percent: number }>> {
+    const cacheKey = `fleet_discounts:${organizationId || 'default'}`;
+    const cached = cache.get<Array<{ min_vehicles: number; discount_percent: number }>>(cacheKey);
+    if (cached) return cached;
+
+    const { data, error } = await supabase
+      .from('pricing_fleet_discounts')
+      .select('min_vehicles, discount_percent')
+      .eq('active', true)
+      .order('min_vehicles', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching fleet discounts:', error);
+      return [];
+    }
+
+    const discounts = data.map(d => ({
+      min_vehicles: d.min_vehicles,
+      discount_percent: parseFloat(d.discount_percent)
+    }));
+
+    cache.set(cacheKey, discounts);
+    return discounts;
+  }
+
+  /**
    * Convert pence to pounds
    */
   static penceToPounds(pence: number): number {

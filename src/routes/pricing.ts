@@ -15,28 +15,62 @@ const router = Router();
 // Validation rules
 const pricingValidation = [
   body('pickup').notEmpty().withMessage('Pickup location is required'),
-  // Dropoff is required for ONE_WAY, RETURN, FLEET but optional for HOURLY, DAILY
+  // Dropoff validation depends on bookingType and baseServiceType
   body('dropoff').custom((value, { req }) => {
     const bookingType = req.body.bookingType;
+    const baseServiceType = req.body.baseServiceType;
+
     // For HOURLY and DAILY, dropoff is optional (chauffeur may stay at pickup)
     if (bookingType === BookingType.HOURLY || bookingType === BookingType.DAILY) {
       return true;
     }
-    // For other types, dropoff is required
+
+    // For FLEET, dropoff depends on baseServiceType
+    if (bookingType === BookingType.FLEET) {
+      // FLEET + ONE_WAY requires dropoff
+      if (baseServiceType === 'one_way' && !value) {
+        throw new Error('Dropoff location is required for FLEET + ONE_WAY');
+      }
+      // FLEET + HOURLY/DAILY: dropoff optional
+      return true;
+    }
+
+    // For ONE_WAY and RETURN, dropoff is required
     if (!value) {
       throw new Error('Dropoff location is required');
     }
     return true;
   }),
-  body('vehicleType').isIn(Object.values(VehicleType)).withMessage('Invalid vehicle type'),
+  // VehicleType validation: required for non-FLEET, not required for FLEET (uses fleetConfig)
+  body('vehicleType').custom((value, { req }) => {
+    const bookingType = req.body.bookingType;
+
+    // FLEET doesn't use vehicleType (uses fleetConfig instead)
+    if (bookingType === BookingType.FLEET) {
+      return true;
+    }
+
+    // For other booking types, vehicleType is required
+    if (!value) {
+      throw new Error('Vehicle type is required');
+    }
+
+    if (!Object.values(VehicleType).includes(value)) {
+      throw new Error('Invalid vehicle type');
+    }
+
+    return true;
+  }),
   body('bookingType').isIn(Object.values(BookingType)).withMessage('Invalid booking type'),
   body('dateTime').isISO8601().withMessage('Valid dateTime is required'),
   body('distance').optional().isFloat({ min: 0 }).withMessage('Distance must be positive'),
   body('duration').optional().isInt({ min: 0 }).withMessage('Duration must be positive'),
-  body('hours').optional().isInt({ min: 1, max: 12 }).withMessage('Hours must be between 1 and 12'),
+  body('hours').optional().isInt({ min: 1, max: 24 }).withMessage('Hours must be between 1 and 24'),
   body('days').optional().isInt({ min: 1, max: 30 }).withMessage('Days must be between 1 and 30'),
   body('extras').optional().isArray().withMessage('Extras must be an array'),
-  body('corporateTier').optional().isIn(['tier1', 'tier2']).withMessage('Invalid corporate tier')
+  body('corporateTier').optional().isIn(['tier1', 'tier2']).withMessage('Invalid corporate tier'),
+  body('fleetConfig').optional().isObject().withMessage('Fleet config must be an object'),
+  body('baseServiceType').optional().isIn(['oneway', 'hourly', 'daily']).withMessage('Invalid base service type')
 ];
 
 // Phase 2A validation (organizationId comes from auth context, not request body)

@@ -18,7 +18,8 @@ import {
   NormalizedOneWayRequest,
   NormalizedReturnRequest,
   NormalizedHourlyRequest,
-  NormalizedDailyRequest
+  NormalizedDailyRequest,
+  NormalizedFleetRequest
 } from '../types/pricing.types';
 import { PricingHelpers } from '../utils/PricingHelpers';
 import { BookingTypeHandlers } from './BookingTypeHandlers';
@@ -28,6 +29,7 @@ import { handleOneWayPricing } from '../handlers/oneWayPricingHandler';
 import { handleReturnPricing } from '../handlers/returnPricingHandler';
 import { handleHourlyPricing } from '../handlers/hourlyPricingHandler';
 import { handleDailyPricing } from '../handlers/dailyPricingHandler';
+import { handleFleetPricing } from '../handlers/fleetPricingHandler';
 
 export class PricingEngine {
 
@@ -39,7 +41,9 @@ export class PricingEngine {
    * - RETURN: Uses new handleReturnPricing() ✅
    * - HOURLY: Uses new handleHourlyPricing() ✅
    * - DAILY: Uses new handleDailyPricing() ✅
-   * - FLEET: Legacy flow (TODO: migrate)
+   * - FLEET: Uses new handleFleetPricing() ✅
+   * 
+   * ALL BOOKING TYPES MIGRATED! 🎉
    */
   public static async calculate(request: NormalizedPricingRequest): Promise<PricingResult> {
     try {
@@ -71,7 +75,14 @@ export class PricingEngine {
         });
       }
 
-      // LEGACY FLOW: Other booking types (temporary until migrated)
+      // NEW FLOW: FLEET uses dedicated handler
+      if (request.bookingType === BookingType.FLEET) {
+        return await handleFleetPricing({
+          request: request as NormalizedFleetRequest
+        });
+      }
+
+      // LEGACY FLOW: Fallback (should never reach here)
       // Convert NormalizedPricingRequest back to legacy PricingRequestData
       const legacyRequest = this.convertToLegacyRequest(request);
 
@@ -110,17 +121,19 @@ export class PricingEngine {
       // Step 1: Base fare (NOT for hourly/daily bookings - those are flat rate)
       if (legacyRequest.bookingType !== BookingType.HOURLY && legacyRequest.bookingType !== BookingType.DAILY) {
         await FeeCalculators.calculateBaseFare(breakdown, legacyRequest);
-        // Capture pricing_version_id from vehicle rates
-        const rates = await PricingDataService.getVehicleRates(
-          legacyRequest.vehicleType,
-          legacyRequest.bookingType,
-          legacyRequest.organizationId
-        );
-        pricingVersionId = rates.pricing_version_id;
+        // Capture pricing_version_id from vehicle rates (only if vehicleType exists)
+        if (legacyRequest.vehicleType) {
+          const rates = await PricingDataService.getVehicleRates(
+            legacyRequest.vehicleType,
+            legacyRequest.bookingType,
+            legacyRequest.organizationId
+          );
+          pricingVersionId = rates.pricing_version_id;
+        }
       }
 
       // Step 2: Calculate main fare (distance/time vs hourly vs daily)
-      if (legacyRequest.bookingType === BookingType.HOURLY) {
+      if (legacyRequest.bookingType === BookingType.HOURLY && legacyRequest.vehicleType) {
         await FeeCalculators.calculateHourlyFee(breakdown, legacyRequest);
         // Capture pricing_version_id from hourly rules
         const hourlyRules = await PricingDataService.getHourlyRules(
@@ -128,7 +141,7 @@ export class PricingEngine {
           legacyRequest.organizationId
         );
         pricingVersionId = hourlyRules.pricing_version_id;
-      } else if (legacyRequest.bookingType === BookingType.DAILY) {
+      } else if (legacyRequest.bookingType === BookingType.DAILY && legacyRequest.vehicleType) {
         await FeeCalculators.calculateDailyFee(breakdown, legacyRequest);
         // Capture pricing_version_id from daily rules
         const dailyRules = await PricingDataService.getDailyRules(

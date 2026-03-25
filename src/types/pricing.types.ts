@@ -175,11 +175,20 @@ export interface NormalizedFleetRequest {
   baseServiceType: BookingType.ONE_WAY | BookingType.HOURLY | BookingType.DAILY; // Fleet layer over base service
   dateTime: string;
   pickup: TripPoint;
-  dropoff: TripPoint;
+  dropoff?: TripPoint; // Optional for HOURLY/DAILY, required for ONE_WAY
   additionalStops: TripPoint[];
-  fleetConfig: Partial<Record<VehicleType, number>>;
-  distance?: number;
-  duration?: number;
+  fleetConfig: Partial<Record<VehicleType, number>>; // e.g., { executive: 2, luxury: 1 }
+
+  // For FLEET + ONE_WAY
+  distance?: number; // Shared route distance for all vehicles
+  duration?: number; // Shared route duration for all vehicles
+
+  // For FLEET + HOURLY
+  hours?: number; // Explicit hours (not calculated from duration)
+
+  // For FLEET + DAILY
+  days?: number; // Explicit days (not calculated from duration)
+
   extras: string[];
   organizationId?: string;
 }

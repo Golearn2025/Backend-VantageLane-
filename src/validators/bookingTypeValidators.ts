@@ -3,7 +3,7 @@
  * Per-booking-type validation logic
  */
 
-import { PricingRequestData, VehicleType } from '../types/pricing.types';
+import { PricingRequestData, VehicleType, BookingType } from '../types/pricing.types';
 import { ValidationError, addError, isValidVehicleType } from './validationHelpers';
 import { validateTripPoint, validateTripPointArray } from './tripPointValidator';
 
@@ -207,11 +207,23 @@ export function validateFleet(
     validateTripPoint(request.pickup, 'pickup', errors);
   }
 
-  // Dropoff required
-  if (!request.dropoff) {
-    addError(errors, 'dropoff', 'Dropoff location is required for FLEET bookings', 'MISSING_DROPOFF');
+  // Dropoff validation depends on baseServiceType
+  // - Required for FLEET + ONE_WAY (route-based)
+  // - Optional for FLEET + HOURLY/DAILY (service-based, chauffeur may stay at pickup)
+  const baseServiceType = (request as any).baseServiceType;
+
+  if (baseServiceType === BookingType.ONE_WAY) {
+    // Dropoff required for FLEET + ONE_WAY
+    if (!request.dropoff) {
+      addError(errors, 'dropoff', 'Dropoff location is required for FLEET + ONE_WAY bookings', 'MISSING_DROPOFF');
+    } else {
+      validateTripPoint(request.dropoff, 'dropoff', errors);
+    }
   } else {
-    validateTripPoint(request.dropoff, 'dropoff', errors);
+    // Dropoff optional for FLEET + HOURLY/DAILY
+    if (request.dropoff) {
+      validateTripPoint(request.dropoff, 'dropoff', errors);
+    }
   }
 
   // Additional stops validation (optional)
