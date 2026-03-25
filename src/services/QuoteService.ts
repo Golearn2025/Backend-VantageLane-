@@ -1,13 +1,17 @@
 /**
- * Quote Service
+ * Quote Service (Thin Orchestrator)
  *
- * Handles persistence of pricing quotes to database:
- * 1. Create leg quotes (client_leg_quotes)
- * 2. Create booking quote (client_booking_quotes)
+ * Orchestrates quote creation and retrieval
+ * Delegates to specialized services:
+ * - QuoteAmountsMapper: calculates money amounts
+ * - QuoteToBookingService: handles quote→booking conversion
  */
 
 import { supabase } from '../config/supabase';
-import { LegBreakdown, PricingResult } from '../types/pricing.types';
+import { PricingResult, NormalizedPricingRequest, LegBreakdown } from '../types/pricing.types';
+import { buildBookingLineItems, buildLegLineItems, buildTripMetadata } from './quotes/quoteLineItemsBuilder';
+import { QuoteAmountsMapper } from './mappers/quoteAmountsMapper';
+import { QuoteToBookingService, QuoteToBookingResult } from './quoteToBookingService';
 
 export interface QuoteCreationResult {
   booking_quote_id: string;
@@ -20,49 +24,48 @@ export class QuoteService {
 
   /**
    * Create independent quote (Phase 2A)
-   * Creates a quote without booking_id for price estimation before booking creation
-   * 
-   * PHASE 2A DESIGN NOTES:
-   * - These are client-facing independent quotes (booking_id = NULL)
-   * - VAT is NOT calculated or persisted at this stage (vat_pence = 0, vat_rate = 0)
-   * - Tax/VAT treatment will be applied later when quote is converted to booking
-   * - total_pence uses PricingEngine.finalPrice for API consistency
-   * - Financial snapshot becomes complete only at booking/invoicing stage
+   * Thin orchestrator - delegates to builder and mapper services
    */
   static async createIndependentQuote(
     pricingResult: PricingResult,
-    requestData: any,
+    requestData: NormalizedPricingRequest,
     organizationId: string
   ): Promise<QuoteCreationResult> {
     try {
       console.log('🎯 Creating independent quote for organization:', organizationId);
 
-      // Calculate pricing totals from actual breakdown (FIXED for consistency)
-      const breakdown = pricingResult.bookingBreakdown;
-      const subtotalPence = Math.round((breakdown?.subtotal || 0) * 100);
-      const discountPence = Math.round((breakdown?.discounts?.total || 0) * 100);
+      // LOG: Check requestData received
+      if (requestData.bookingType === 'fleet') {
+        console.error('🔴 QuoteService.createIndependentQuote - FLEET requestData:');
+        console.error('  baseServiceType:', (requestData as any).baseServiceType);
+        console.error('  hours:', (requestData as any).hours);
+        console.error('  Full:', JSON.stringify(requestData, null, 2));
+      }
 
-      // CRITICAL FIX: Use PricingEngine.finalPrice for consistency with API response
-      const totalPence = Math.round((pricingResult.finalPrice || 0) * 100);
-
-      // Phase 2A: PricingEngine doesn't calculate VAT, so we set VAT to zero
-      // VAT will be calculated later when quote is converted to booking
-      const vatPence = 0;
-      const vatRate = 0;
+      // Delegate amount calculations to mapper
+      const amounts = QuoteAmountsMapper.calculateIndependentQuoteAmounts(pricingResult);
+      const split = QuoteAmountsMapper.splitSubtotal(pricingResult);
 
       // Vehicle vs Services split (matching createBookingQuote semantics)
-      const vehicleSubtotalPence = Math.round(
-        ((breakdown?.baseFare || 0) +
-          (breakdown?.distanceFee || 0) +
-          (breakdown?.timeFee || 0) +
-          (breakdown?.airportFees || 0) +
-          (breakdown?.zoneFees || 0) +
-          (breakdown?.tollFees || 0)) * 100
-      );
-      const servicesSubtotalPence = Math.round((breakdown?.serviceItemFees || 0) * 100);
+      const vehicleSubtotalPence = split.vehicleSubtotalPence;
+      const servicesSubtotalPence = split.servicesSubtotalPence;
 
       const vehicleDiscountPence = 0; // No separate vehicle discount yet
       const servicesDiscountPence = 0; // No separate services discount yet
+
+      // Build trip metadata and line items using the same code as QuotePersistenceService
+      const tripMetadata = buildTripMetadata(requestData);
+      const lineItems = buildBookingLineItems(
+        pricingResult.bookingBreakdown!,
+        amounts.subtotalPence,
+        amounts.discountPence,
+        amounts.vatPence,
+        amounts.totalPence,
+        tripMetadata
+      );
+
+      // LOG 2: lineItems before insert
+      console.error('🔴 QUOTE INSERT line_items =', JSON.stringify(lineItems, null, 2));
 
       // Create independent quote with booking_id = NULL
       const { data, error } = await supabase
@@ -77,11 +80,11 @@ export class QuoteService {
           pricing_version_id: pricingResult.pricing_version_id || null,
 
           // Required pricing fields
-          subtotal_pence: subtotalPence,
-          discount_pence: discountPence,
-          vat_rate: vatRate,
-          vat_pence: vatPence,
-          total_pence: totalPence,
+          subtotal_pence: amounts.subtotalPence,
+          discount_pence: amounts.discountPence,
+          vat_rate: 0,
+          vat_pence: amounts.vatPence,
+          total_pence: amounts.totalPence,
 
           // Vehicle vs Services split
           vehicle_subtotal_pence: vehicleSubtotalPence,
@@ -89,49 +92,8 @@ export class QuoteService {
           services_subtotal_pence: servicesSubtotalPence,
           services_discount_pence: servicesDiscountPence,
 
-          // Line items as JSONB with Phase 2A trip metadata
-          line_items: {
-            components: [
-              { code: 'base_fare', label: 'Base fare', amount_pence: Math.round((pricingResult.bookingBreakdown?.baseFare || 0) * 100) },
-              { code: 'distance_fee', label: 'Distance fee', amount_pence: Math.round((pricingResult.bookingBreakdown?.distanceFee || 0) * 100) },
-              { code: 'time_fee', label: 'Time fee', amount_pence: Math.round((pricingResult.bookingBreakdown?.timeFee || 0) * 100) },
-              { code: 'airport_fees', label: 'Airport fees', amount_pence: Math.round((pricingResult.bookingBreakdown?.airportFees || 0) * 100) },
-              { code: 'multi_stop_fees', label: 'Multi-stop fees', amount_pence: Math.round((pricingResult.bookingBreakdown?.multiStopFees || 0) * 100) },
-              { code: 'service_item_fees', label: 'Service Item Fees', amount_pence: Math.round((pricingResult.bookingBreakdown?.serviceItemFees || 0) * 100) }
-            ].filter(c => c.amount_pence > 0),
-            discounts: (pricingResult.bookingBreakdown?.discounts?.total || 0) > 0
-              ? [{ code: 'discount', label: 'Discount', amount_pence: Math.round((pricingResult.bookingBreakdown?.discounts?.total || 0) * 100) }]
-              : [],
-            multipliers: Object.entries(pricingResult.bookingBreakdown?.multipliers || {}).map(([code, factor]) => ({
-              code,
-              label: code.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-              factor: factor as number
-            })),
-            summary: {
-              subtotal_pence: subtotalPence,
-              discount_pence: discountPence,
-              vat_pence: vatPence,
-              total_pence: totalPence
-            },
-            // Phase 2A: Persist trip metadata for safe quote -> booking conversion
-            meta: {
-              calc_source: 'pricing_engine_v2',
-              calc_version: '2.0.0',
-              trip: {
-                pickup: requestData.pickup,
-                dropoff: requestData.dropoff,
-                dateTime: requestData.dateTime,
-                bookingType: requestData.bookingType,
-                vehicleType: requestData.vehicleType,
-                distance: requestData.distance ?? null,
-                duration: requestData.duration ?? null,
-                coordinates: requestData.coordinates ?? null,
-                hours: requestData.hours ?? null,
-                days: requestData.days ?? null,
-                extras: requestData.extras ?? []
-              }
-            }
-          },
+          // Use lineItems variable
+          line_items: lineItems,
 
           // Metadata
           calc_source: 'pricing_engine_v2',
@@ -157,6 +119,19 @@ export class QuoteService {
 
       console.log('✅ Independent quote created successfully:', data.id);
 
+      // LOG 3: Fetch exact DB row immediately after insert
+      const { data: dbRow, error: fetchError } = await supabase
+        .from('client_booking_quotes')
+        .select('id, line_items')
+        .eq('id', data.id)
+        .single();
+
+      if (dbRow) {
+        console.error('🔴 DB ROW AFTER INSERT =', JSON.stringify(dbRow.line_items, null, 2));
+      } else {
+        console.error('❌ Failed to fetch DB row:', fetchError);
+      }
+
       return {
         booking_quote_id: data.id,
         leg_quote_ids: [], // No leg quotes for independent quotes (Phase 2A)
@@ -176,14 +151,14 @@ export class QuoteService {
 
   /**
    * Create complete quote (legs + booking)
-   * This is called after pricing calculation
+   * Thin orchestrator - delegates to builders/mappers
    *
    * NOTE: booking_id is required for this method. For independent quotes (Phase 2A),
    * use createIndependentQuote() instead.
    */
   static async createQuote(
     pricingResult: PricingResult,
-    requestData: any,
+    requestData: NormalizedPricingRequest,
     organizationId: string,
     bookingId?: string
   ): Promise<QuoteCreationResult> {
@@ -244,6 +219,7 @@ export class QuoteService {
 
   /**
    * Create individual leg quote
+   * Delegates to QuoteAmountsMapper and QuoteLineItemsBuilder
    */
   private static async createLegQuote(
     leg: LegBreakdown,
@@ -251,6 +227,9 @@ export class QuoteService {
     bookingId: string
   ): Promise<string> {
     const bookingLegId = crypto.randomUUID();
+
+    // Delegate amount calculations to mapper
+    const amounts = QuoteAmountsMapper.calculateLegQuoteAmounts(leg, 0.20);
 
     const { data, error } = await supabase
       .from('client_leg_quotes')
@@ -262,36 +241,21 @@ export class QuoteService {
         is_locked: false,
         currency: 'GBP',
 
-        // Required fields with defaults
-        subtotal_pence: Math.round((leg.pricing?.subtotal || 0) * 100),
-        discount_pence: 0,
+        // Amounts from mapper
+        subtotal_pence: amounts.subtotalPence,
+        discount_pence: amounts.discountPence,
         vat_rate: 0.20,
-        vat_pence: Math.round((leg.pricing?.subtotal || 0) * 100 * 0.20),
-        total_pence: Math.round((leg.pricing?.finalPrice || leg.pricing?.subtotal || 0) * 100),
+        vat_pence: amounts.vatPence,
+        total_pence: amounts.totalPence,
 
-        line_items: {
-          components: [
-            { code: 'base_fare', label: 'Base fare', amount_pence: Math.round((leg.pricing?.baseFare || 0) * 100) },
-            { code: 'distance_fee', label: 'Distance fee', amount_pence: Math.round((leg.pricing?.distanceFee || 0) * 100) },
-            { code: 'time_fee', label: 'Time fee', amount_pence: Math.round((leg.pricing?.timeFee || 0) * 100) },
-            { code: 'airport_fee', label: 'Airport fee', amount_pence: Math.round((leg.pricing?.airportFees || 0) * 100) },
-            { code: 'zone_fee', label: 'Zone fee', amount_pence: Math.round((leg.pricing?.zoneFees || 0) * 100) },
-            { code: 'toll_fee', label: 'Toll fee', amount_pence: Math.round((leg.pricing?.tollFees || 0) * 100) },
-            { code: 'service_item_fees', label: 'Service Item Fees', amount_pence: Math.round((leg.pricing?.serviceItemFees || 0) * 100) }
-          ].filter(c => c.amount_pence > 0),
-          discounts: [],
-          multipliers: [],
-          summary: {
-            subtotal_pence: Math.round((leg.pricing?.subtotal || 0) * 100),
-            discount_pence: 0,
-            vat_pence: Math.round((leg.pricing?.subtotal || 0) * 100 * 0.20),
-            total_pence: Math.round((leg.pricing?.finalPrice || leg.pricing?.subtotal || 0) * 100)
-          },
-          meta: {
-            calc_source: 'pricing_engine_v2',
-            calc_version: '2.0.0'
-          }
-        },
+        // Delegate line items building to builder
+        line_items: buildLegLineItems(
+          leg.pricing,
+          amounts.subtotalPence,
+          amounts.discountPence,
+          amounts.vatPence,
+          amounts.totalPence
+        ),
 
         calc_source: 'pricing_engine_v2',
         calc_version: '2.0.0',
@@ -312,35 +276,23 @@ export class QuoteService {
 
   /**
    * Create booking quote (aggregated from all legs)
+   * Delegates to QuoteAmountsMapper and QuoteLineItemsBuilder
    */
   private static async createBookingQuote(
     pricingResult: PricingResult,
-    requestData: any,
+    requestData: NormalizedPricingRequest,
     legQuoteIds: string[],
     organizationId: string,
     bookingId: string
   ): Promise<string> {
-    const subtotalPence = Math.round((pricingResult.bookingBreakdown?.subtotal || pricingResult.finalPrice || 0) * 100);
-    const discountPence = Math.round((pricingResult.bookingBreakdown?.discounts?.total || 0) * 100);
-    const vatRate = 0.20;
-    const vatPence = Math.round(subtotalPence * vatRate);
-    const totalPence = subtotalPence + vatPence - discountPence;
+    // Delegate amount calculations to mapper
+    const amounts = QuoteAmountsMapper.calculateBookingQuoteAmounts(pricingResult);
+    const split = QuoteAmountsMapper.splitSubtotal(pricingResult);
 
-    // Calculate vehicle vs services split
-    const vehicleSubtotalPence = Math.round((
-      (pricingResult.bookingBreakdown?.baseFare || 0) +
-      (pricingResult.bookingBreakdown?.distanceFee || 0) +
-      (pricingResult.bookingBreakdown?.timeFee || 0) +
-      (pricingResult.bookingBreakdown?.airportFees || 0) +
-      (pricingResult.bookingBreakdown?.zoneFees || 0) +
-      (pricingResult.bookingBreakdown?.tollFees || 0)
-    ) * 100);
+    // Build trip metadata before insert
+    const tripMetadata = buildTripMetadata(requestData);
 
-    const servicesSubtotalPence = Math.round((pricingResult.bookingBreakdown?.serviceItemFees || 0) * 100);
-
-    const vehicleDiscountPence = 0; // No separate vehicle discount yet
-    const servicesDiscountPence = 0; // No separate services discount yet
-
+    // Create booking quote
     const { data, error } = await supabase
       .from('client_booking_quotes')
       .insert({
@@ -352,50 +304,28 @@ export class QuoteService {
         currency: pricingResult.currency || 'GBP',
         pricing_version_id: pricingResult.pricing_version_id || null,
 
-        // Required pricing fields
-        subtotal_pence: subtotalPence,
-        discount_pence: discountPence,
-        vat_rate: vatRate,
-        vat_pence: vatPence,
-        total_pence: totalPence,
+        // Amounts from mapper
+        subtotal_pence: amounts.subtotalPence,
+        discount_pence: amounts.discountPence,
+        vat_rate: 0.20,
+        vat_pence: amounts.vatPence,
+        total_pence: amounts.totalPence,
 
-        // Vehicle vs Services split
-        vehicle_subtotal_pence: vehicleSubtotalPence,
-        vehicle_discount_pence: vehicleDiscountPence,
-        services_subtotal_pence: servicesSubtotalPence,
-        services_discount_pence: servicesDiscountPence,
+        // Vehicle vs Services split from mapper
+        vehicle_subtotal_pence: split.vehicleSubtotalPence,
+        vehicle_discount_pence: 0,
+        services_subtotal_pence: split.servicesSubtotalPence,
+        services_discount_pence: 0,
 
-        // Line items as JSONB
-        line_items: {
-          components: [
-            { code: 'base_fare', label: 'Base fare', amount_pence: Math.round((pricingResult.bookingBreakdown?.baseFare || 0) * 100) },
-            { code: 'distance_fee', label: 'Distance fee', amount_pence: Math.round((pricingResult.bookingBreakdown?.distanceFee || 0) * 100) },
-            { code: 'time_fee', label: 'Time fee', amount_pence: Math.round((pricingResult.bookingBreakdown?.timeFee || 0) * 100) },
-            { code: 'airport_fees', label: 'Airport fees', amount_pence: Math.round((pricingResult.bookingBreakdown?.airportFees || 0) * 100) },
-            { code: 'zone_fees', label: 'Zone fees', amount_pence: Math.round((pricingResult.bookingBreakdown?.zoneFees || 0) * 100) },
-            { code: 'toll_fees', label: 'Toll fees', amount_pence: Math.round((pricingResult.bookingBreakdown?.tollFees || 0) * 100) },
-            { code: 'multi_stop_fees', label: 'Multi-stop fees', amount_pence: Math.round((pricingResult.bookingBreakdown?.multiStopFees || 0) * 100) },
-            { code: 'service_item_fees', label: 'Service Item Fees', amount_pence: Math.round((pricingResult.bookingBreakdown?.serviceItemFees || 0) * 100) }
-          ].filter(c => c.amount_pence > 0),
-          discounts: (pricingResult.bookingBreakdown?.discounts?.total || 0) > 0
-            ? [{ code: 'discount', label: 'Discount', amount_pence: Math.round((pricingResult.bookingBreakdown?.discounts?.total || 0) * 100) }]
-            : [],
-          multipliers: Object.entries(pricingResult.bookingBreakdown?.multipliers || {}).map(([code, factor]) => ({
-            code,
-            label: code.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-            factor: factor as number
-          })),
-          summary: {
-            subtotal_pence: subtotalPence,
-            discount_pence: discountPence,
-            vat_pence: vatPence,
-            total_pence: totalPence
-          },
-          meta: {
-            calc_source: 'pricing_engine_v2',
-            calc_version: '2.0.0'
-          }
-        },
+        // Delegate line items building to builder
+        line_items: buildBookingLineItems(
+          pricingResult.bookingBreakdown!,
+          amounts.subtotalPence,
+          amounts.discountPence,
+          amounts.vatPence,
+          amounts.totalPence,
+          tripMetadata
+        ),
 
         calc_source: 'pricing_engine_v2',
         calc_version: '2.0.0',
@@ -469,240 +399,12 @@ export class QuoteService {
       notes?: string;
       preferences?: Record<string, any>;
     }
-  ): Promise<{
-    success: boolean;
-    bookingId?: string;
-    quoteId?: string;
-    error?: string;
-  }> {
-    try {
-      console.log('🎯 Phase 2B: Converting quote to booking (ATOMIC):', quoteId);
-
-      // Call atomic RPC function
-      const { data, error } = await supabase.rpc('convert_quote_to_booking_atomic', {
-        p_quote_id: quoteId,
-        p_organization_id: organizationId,
-        p_customer_id: customerData.customerId,
-        p_passenger_count: bookingData?.passengerCount || 1,
-        p_bag_count: bookingData?.bagCount || 0,
-        p_notes_internal: bookingData?.notes || ''
-      });
-
-      if (error) {
-        console.error('❌ Phase 2B RPC error:', error);
-        return {
-          success: false,
-          error: error.message,
-          quoteId
-        };
-      }
-
-      if (!data) {
-        return {
-          success: false,
-          error: 'RPC returned no data',
-          quoteId
-        };
-      }
-
-      // Parse JSONB result
-      const result = typeof data === 'object' ? data : JSON.parse(data);
-
-      if (!result.success) {
-        return {
-          success: false,
-          error: result.error_message || 'Unknown RPC error',
-          quoteId
-        };
-      }
-
-      console.log('✅ Phase 2B: Quote successfully converted to booking (ATOMIC)');
-      console.log(`  Quote ID: ${quoteId} → Booking ID: ${result.booking_id}`);
-
-      return {
-        success: true,
-        bookingId: result.booking_id,
-        quoteId: result.quote_id
-      };
-    } catch (error: any) {
-      console.error('❌ Phase 2B: Error converting quote to booking:', error);
-
-      return {
-        success: false,
-        error: error.message,
-        quoteId
-      };
-    }
-  }
-
-  /**
-   * Extract trip configuration from real quote metadata
-   *
-   * CRITICAL:
-   * - Reads ONLY from persisted Phase 2A metadata
-   * - NO invented data
-   * - NO placeholders
-   * - NO fallback defaults
-   */
-  private static extractTripConfigurationFromQuote(quote: any): {
-    bookingType: string;
-    scheduledAt: string;
-    pickup: string;
-    dropoff: string;
-    distance: number | null;
-    duration: number | null;
-    vehicleCategory: string;
-    coordinates: any;
-    hours: number | null;
-    days: number | null;
-    extras: any[];
-  } {
-    const trip = quote?.line_items?.meta?.trip;
-
-    if (
-      !trip?.pickup ||
-      !trip?.dropoff ||
-      !trip?.dateTime ||
-      !trip?.bookingType ||
-      !trip?.vehicleType
-    ) {
-      throw new Error(
-        'Quote missing required trip metadata for conversion. Required: pickup, dropoff, dateTime, bookingType, vehicleType'
-      );
-    }
-
-    // Map booking type from frontend enum to DB enum
-    const bookingTypeMapping: Record<string, string> = {
-      'one_way': 'oneway',
-      'return': 'return',
-      'hourly': 'hourly',
-      'daily': 'daily',
-      'fleet': 'fleet'
-    };
-
-    const dbBookingType = bookingTypeMapping[trip.bookingType] || trip.bookingType;
-
-    return {
-      bookingType: dbBookingType,             // MAPPED to DB enum
-      scheduledAt: trip.dateTime,              // REAL DATA from Phase 2A
-      pickup: trip.pickup,                    // REAL DATA from Phase 2A
-      dropoff: trip.dropoff,                  // REAL DATA from Phase 2A
-      distance: trip.distance ?? null,        // REAL DATA from Phase 2A
-      duration: trip.duration ?? null,        // REAL DATA from Phase 2A
-      vehicleCategory: trip.vehicleType,      // REAL DATA from Phase 2A
-      coordinates: trip.coordinates ?? null,   // REAL DATA from Phase 2A
-      hours: trip.hours ?? null,             // REAL DATA from Phase 2A
-      days: trip.days ?? null,               // REAL DATA from Phase 2A
-      extras: trip.extras ?? []              // REAL DATA from Phase 2A
-    };
-  }
-
-  /**
-   * Create booking legs and associated leg quotes
-   */
-  private static async createBookingLegs(
-    bookingId: string,
-    tripConfig: {
-      bookingType: string;
-      scheduledAt: string;
-      pickup: string;
-      dropoff: string;
-      distance: number | null;
-      duration: number | null;
-      vehicleCategory: string;
-      coordinates: any;
-      hours: number | null;
-      days: number | null;
-      extras: any[];
-    },
-    quote: any
-  ): Promise<{
-    success: boolean;
-    legIds?: string[];
-    error?: string;
-  }> {
-    try {
-      // Phase 2B scope: single main leg only
-      const { data: bookingLeg, error: legError } = await supabase
-        .from('booking_legs')
-        .insert({
-          booking_id: bookingId,
-          leg_number: 1,
-          leg_kind: 'main',
-          status: 'PENDING',
-          pickup_address: tripConfig.pickup,
-          dropoff_address: tripConfig.dropoff,
-          scheduled_at: tripConfig.scheduledAt,
-          vehicle_category_id: tripConfig.vehicleCategory,
-          distance_miles: tripConfig.distance,
-          duration_min: tripConfig.duration,
-          organization_id: quote.organization_id
-        })
-        .select('id')
-        .single();
-
-      if (legError || !bookingLeg) {
-        return {
-          success: false,
-          error: legError?.message || 'Failed to create booking leg'
-        };
-      }
-
-      const { error: legQuoteError } = await supabase
-        .from('client_leg_quotes')
-        .insert({
-          booking_leg_id: bookingLeg.id,
-          booking_id: bookingId,
-          version: 1,
-          is_locked: false,
-          currency: quote.currency,
-          subtotal_pence: quote.subtotal_pence,
-          discount_pence: quote.discount_pence,
-          vat_rate: quote.vat_rate,
-          vat_pence: quote.vat_pence,
-          total_pence: quote.total_pence,
-          line_items: quote.line_items,
-          calc_source: 'pricing_engine_v2',
-          calc_version: '2.0.0',
-          organization_id: quote.organization_id
-        });
-
-      if (legQuoteError) {
-        return {
-          success: false,
-          error: legQuoteError.message || 'Failed to create client leg quote'
-        };
-      }
-
-      return {
-        success: true,
-        legIds: [bookingLeg.id]
-      };
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.message
-      };
-    }
-  }
-
-  /**
-   * DEPRECATED - NO-OP
-   *
-   * Update quote status - NOT IMPLEMENTED
-   *
-   * The column 'quote_status' does not exist in client_booking_quotes table.
-   * This function is kept for backward compatibility but does nothing.
-   *
-   * TODO: Implement quote status tracking when schema is updated to include status column,
-   * or remove this function and all its call sites if status tracking is not needed.
-   */
-  static async updateQuoteStatus(
-    quoteId: string,
-    status: 'pending' | 'accepted' | 'rejected' | 'expired'
-  ): Promise<void> {
-    console.warn(`⚠️  updateQuoteStatus() is deprecated (quote_status column doesn't exist). Called with quoteId=${quoteId}, status=${status}`);
-    // No-op: quote_status column doesn't exist in client_booking_quotes
-    return;
+  ): Promise<QuoteToBookingResult> {
+    return QuoteToBookingService.convertQuoteToBooking(
+      quoteId,
+      organizationId,
+      customerData,
+      bookingData
+    );
   }
 }

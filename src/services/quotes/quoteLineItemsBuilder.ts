@@ -227,6 +227,9 @@ export function buildTripMetadata(requestData: NormalizedPricingRequest): any {
     case BookingType.FLEET:
       return {
         ...baseMetadata,
+        baseServiceType: requestData.baseServiceType ?? null,
+        hours: requestData.hours ?? null,
+        days: requestData.days ?? null,
         fleetConfig: requestData.fleetConfig,
         // NOTE: Fleet config is just vehicle counts (e.g., {EXECUTIVE: 2, LUXURY: 1})
         // Individual trip details are in the legs breakdown, not in fleetConfig
