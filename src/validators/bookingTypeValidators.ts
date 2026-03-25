@@ -144,6 +144,8 @@ export function validateDaily(
     addError(errors, 'days', 'Days is required for DAILY bookings', 'MISSING_DAYS');
   } else if (typeof request.days !== 'number' || request.days < 1 || request.days > 30) {
     addError(errors, 'days', 'Days must be a number between 1 and 30', 'INVALID_DAYS_VALUE');
+  } else if (!Number.isInteger(request.days)) {
+    addError(errors, 'days', 'Days must be a whole number (1, 2, 3, etc.) - no fractional days allowed', 'INVALID_DAYS_FRACTIONAL');
   }
 
   // Pickup required
@@ -174,7 +176,7 @@ export function validateFleet(
   } else {
     // Validate fleet config structure
     const vehicleTypes = Object.keys(request.fleetConfig);
-    
+
     if (vehicleTypes.length === 0) {
       addError(errors, 'fleetConfig', 'Fleet configuration must specify at least one vehicle type', 'EMPTY_FLEET_CONFIG');
     }

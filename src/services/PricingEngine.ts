@@ -16,7 +16,9 @@ import {
   VehicleType,
   NormalizedPricingRequest,
   NormalizedOneWayRequest,
-  NormalizedReturnRequest
+  NormalizedReturnRequest,
+  NormalizedHourlyRequest,
+  NormalizedDailyRequest
 } from '../types/pricing.types';
 import { PricingHelpers } from '../utils/PricingHelpers';
 import { BookingTypeHandlers } from './BookingTypeHandlers';
@@ -24,6 +26,8 @@ import { FeeCalculators } from './FeeCalculators';
 import { PricingDataService } from './PricingDataService';
 import { handleOneWayPricing } from '../handlers/oneWayPricingHandler';
 import { handleReturnPricing } from '../handlers/returnPricingHandler';
+import { handleHourlyPricing } from '../handlers/hourlyPricingHandler';
+import { handleDailyPricing } from '../handlers/dailyPricingHandler';
 
 export class PricingEngine {
 
@@ -33,8 +37,8 @@ export class PricingEngine {
    * MIGRATION STATUS:
    * - ONE_WAY: Uses new handleOneWayPricing() ✅
    * - RETURN: Uses new handleReturnPricing() ✅
-   * - HOURLY: Legacy flow (TODO: migrate)
-   * - DAILY: Legacy flow (TODO: migrate)
+   * - HOURLY: Uses new handleHourlyPricing() ✅
+   * - DAILY: Uses new handleDailyPricing() ✅
    * - FLEET: Legacy flow (TODO: migrate)
    */
   public static async calculate(request: NormalizedPricingRequest): Promise<PricingResult> {
@@ -50,6 +54,20 @@ export class PricingEngine {
       if (request.bookingType === BookingType.RETURN) {
         return await handleReturnPricing({
           request: request as NormalizedReturnRequest
+        });
+      }
+
+      // NEW FLOW: HOURLY uses dedicated handler
+      if (request.bookingType === BookingType.HOURLY) {
+        return await handleHourlyPricing({
+          request: request as NormalizedHourlyRequest
+        });
+      }
+
+      // NEW FLOW: DAILY uses dedicated handler
+      if (request.bookingType === BookingType.DAILY) {
+        return await handleDailyPricing({
+          request: request as NormalizedDailyRequest
         });
       }
 

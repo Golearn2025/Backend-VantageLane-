@@ -15,7 +15,19 @@ const router = Router();
 // Validation rules
 const pricingValidation = [
   body('pickup').notEmpty().withMessage('Pickup location is required'),
-  body('dropoff').notEmpty().withMessage('Dropoff location is required'),
+  // Dropoff is required for ONE_WAY, RETURN, FLEET but optional for HOURLY, DAILY
+  body('dropoff').custom((value, { req }) => {
+    const bookingType = req.body.bookingType;
+    // For HOURLY and DAILY, dropoff is optional (chauffeur may stay at pickup)
+    if (bookingType === BookingType.HOURLY || bookingType === BookingType.DAILY) {
+      return true;
+    }
+    // For other types, dropoff is required
+    if (!value) {
+      throw new Error('Dropoff location is required');
+    }
+    return true;
+  }),
   body('vehicleType').isIn(Object.values(VehicleType)).withMessage('Invalid vehicle type'),
   body('bookingType').isIn(Object.values(BookingType)).withMessage('Invalid booking type'),
   body('dateTime').isISO8601().withMessage('Valid dateTime is required'),
