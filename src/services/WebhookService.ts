@@ -219,7 +219,6 @@ export class WebhookService {
           // Don't save fee estimation - real fee will come from charge.succeeded
           stripe_charge_id: (typeof paymentIntent.latest_charge === 'string' ? paymentIntent.latest_charge : paymentIntent.latest_charge?.id) || null,
           captured_at: new Date().toISOString(),
-          processed_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         })
         .eq('id', paymentRecord.id)
@@ -290,7 +289,6 @@ export class WebhookService {
           status: 'failed',
           failed_at: new Date().toISOString(),
           last_error: lastError,
-          processed_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         })
         .eq('id', paymentRecord.id)
@@ -358,7 +356,6 @@ export class WebhookService {
         .update({
           status: 'canceled', // DB enum is 'canceled' (without L)
           canceled_at: new Date().toISOString(),
-          processed_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         })
         .eq('id', paymentRecord.id)
