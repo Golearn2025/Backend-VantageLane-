@@ -208,6 +208,29 @@ export async function handleFleetPricing(
       });
     }
 
+    // 6. Build fleet summary per vehicle category
+    const summaryMap: Record<string, { count: number; unitPrice: number; totalPrice: number }> = {};
+    for (const leg of legs) {
+      const category = leg.vehicle_category || 'unknown';
+      if (!summaryMap[category]) {
+        summaryMap[category] = {
+          count: 0,
+          unitPrice: leg.pricing.finalPrice, // Price per vehicle after discount
+          totalPrice: 0
+        };
+      }
+      summaryMap[category].count++;
+      summaryMap[category].totalPrice += leg.pricing.finalPrice;
+    }
+
+    // Convert to array format matching FleetCategorySummary[]
+    const fleetSummary = Object.entries(summaryMap).map(([category, data]) => ({
+      category: category as VehicleType,
+      count: data.count,
+      unit_price: data.unitPrice,
+      total: data.totalPrice
+    }));
+
     return {
       success: true,
       finalPrice: bookingBreakdown.finalPrice,
@@ -215,12 +238,13 @@ export async function handleFleetPricing(
       pricing_version_id: pricingVersionId,
       bookingBreakdown,
       legs,
+      fleetSummary, // Summary per vehicle category (array format)
       normalizedRoute: {
         bookingType: request.bookingType,
         dateTime: request.dateTime,
         pickup: request.pickup,
         dropoff: request.dropoff,
-        additionalStops: request.additionalStops,
+        additionalStops: request.additionalStops || [],
       },
       timestamp: new Date().toISOString(),
     };
@@ -285,17 +309,6 @@ async function calculateFleetVehicleLegPricing(
     finalPrice: 0,
     details: [],
   };
-
-  // DEBUG: Log request details for FLEET + ONE_WAY troubleshooting
-  console.log('[FLEET DEBUG] Vehicle leg pricing:', {
-    vehicleIndex,
-    vehicleType,
-    baseServiceType: request.baseServiceType,
-    distance: request.distance,
-    duration: request.duration,
-    extras: request.extras,
-    hasDropoff: !!request.dropoff
-  });
 
   // Calculate pricing based on baseServiceType
   if (request.baseServiceType === BookingType.ONE_WAY) {
