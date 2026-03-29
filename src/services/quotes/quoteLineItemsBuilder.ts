@@ -181,7 +181,12 @@ export function buildTripMetadata(requestData: NormalizedPricingRequest): any {
     pickup: requestData.pickup,
     extras: requestData.extras ?? [],
     // Keep tripPreferences separate for driver visibility (not in extras array)
-    ...(requestData.tripPreferences && { tripPreferences: requestData.tripPreferences })
+    ...(requestData.tripPreferences && { tripPreferences: requestData.tripPreferences }),
+    // Trip logistics
+    ...(requestData.passengers && { passengers: requestData.passengers }),
+    ...(requestData.luggage && { luggage: requestData.luggage }),
+    ...(requestData.flightNumber && { flightNumber: requestData.flightNumber }),
+    ...(requestData.customRequirements && { customRequirements: requestData.customRequirements })
   };
 
   // Add booking-type-specific fields

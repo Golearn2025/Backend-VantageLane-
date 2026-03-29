@@ -120,6 +120,10 @@ export interface PricingRequestData {
     };
     paidUpgrades?: string[];
   };
+  passengers?: number;
+  luggage?: number;
+  flightNumber?: string;
+  customRequirements?: string;
   corporateTier?: string;
   organizationId?: string;
 }
@@ -143,6 +147,10 @@ export interface NormalizedOneWayRequest {
     temperature?: string;
     communication?: string;
   };
+  passengers?: number;
+  luggage?: number;
+  flightNumber?: string;
+  customRequirements?: string;
   organizationId?: string;
 }
 
@@ -165,6 +173,10 @@ export interface NormalizedReturnRequest {
     temperature?: string;
     communication?: string;
   };
+  passengers?: number;
+  luggage?: number;
+  flightNumber?: string;
+  customRequirements?: string;
   organizationId?: string;
 }
 
@@ -181,6 +193,10 @@ export interface NormalizedHourlyRequest {
     temperature?: string;
     communication?: string;
   };
+  passengers?: number;
+  luggage?: number;
+  flightNumber?: string;
+  customRequirements?: string;
   organizationId?: string;
 }
 
@@ -197,6 +213,10 @@ export interface NormalizedDailyRequest {
     temperature?: string;
     communication?: string;
   };
+  passengers?: number;
+  luggage?: number;
+  flightNumber?: string;
+  customRequirements?: string;
   organizationId?: string;
 }
 
@@ -225,6 +245,10 @@ export interface NormalizedFleetRequest {
     temperature?: string;
     communication?: string;
   };
+  passengers?: number;
+  luggage?: number;
+  flightNumber?: string;
+  customRequirements?: string;
   organizationId?: string;
 }
 

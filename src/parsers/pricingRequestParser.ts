@@ -106,6 +106,10 @@ function parseOneWay(request: PricingRequestData): ParseResult {
     duration: request.duration,
     extras,
     tripPreferences,
+    passengers: request.passengers,
+    luggage: request.luggage,
+    flightNumber: request.flightNumber,
+    customRequirements: request.customRequirements,
     organizationId: request.organizationId,
   };
 
@@ -152,6 +156,10 @@ function parseReturn(request: PricingRequestData): ParseResult {
     duration: request.duration,
     extras,
     tripPreferences,
+    passengers: request.passengers,
+    luggage: request.luggage,
+    flightNumber: request.flightNumber,
+    customRequirements: request.customRequirements,
     organizationId: request.organizationId,
   };
 
@@ -185,6 +193,10 @@ function parseHourly(request: PricingRequestData): ParseResult {
     dropoff,
     extras,
     tripPreferences,
+    passengers: request.passengers,
+    luggage: request.luggage,
+    flightNumber: request.flightNumber,
+    customRequirements: request.customRequirements,
     organizationId: request.organizationId,
   };
 
@@ -218,6 +230,10 @@ function parseDaily(request: PricingRequestData): ParseResult {
     dropoff,
     extras,
     tripPreferences,
+    passengers: request.passengers,
+    luggage: request.luggage,
+    flightNumber: request.flightNumber,
+    customRequirements: request.customRequirements,
     organizationId: request.organizationId,
   };
 
@@ -267,6 +283,10 @@ function parseFleet(request: PricingRequestData): ParseResult {
     days: request.days,
     extras,
     tripPreferences,
+    passengers: request.passengers,
+    luggage: request.luggage,
+    flightNumber: request.flightNumber,
+    customRequirements: request.customRequirements,
     organizationId: request.organizationId,
   };
 
