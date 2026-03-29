@@ -21,6 +21,7 @@ import {
   NormalizedFleetRequest,
   NormalizedPricingRequest,
 } from '../types/pricing.types';
+import { normalizeServicePackagesToExtras } from './servicePackagesNormalizer';
 
 export interface ParseError {
   field: string;
@@ -91,6 +92,9 @@ function parseOneWay(request: PricingRequestData): ParseResult {
     return { success: false, errors };
   }
 
+  // Normalize servicePackages to extras array
+  const { extras, tripPreferences } = normalizeServicePackagesToExtras(request);
+
   const normalized: NormalizedOneWayRequest = {
     bookingType: BookingType.ONE_WAY,
     vehicleType: request.vehicleType!,
@@ -100,7 +104,8 @@ function parseOneWay(request: PricingRequestData): ParseResult {
     additionalStops,
     distance: request.distance,
     duration: request.duration,
-    extras: request.extras || [],
+    extras,
+    tripPreferences,
     organizationId: request.organizationId,
   };
 
@@ -129,6 +134,9 @@ function parseReturn(request: PricingRequestData): ParseResult {
     return { success: false, errors };
   }
 
+  // Normalize servicePackages to extras array
+  const { extras, tripPreferences } = normalizeServicePackagesToExtras(request);
+
   const normalized: NormalizedReturnRequest = {
     bookingType: BookingType.RETURN,
     vehicleType: request.vehicleType!,
@@ -142,7 +150,8 @@ function parseReturn(request: PricingRequestData): ParseResult {
     returnAdditionalStops,
     distance: request.distance,
     duration: request.duration,
-    extras: request.extras || [],
+    extras,
+    tripPreferences,
     organizationId: request.organizationId,
   };
 
@@ -164,6 +173,9 @@ function parseHourly(request: PricingRequestData): ParseResult {
     return { success: false, errors };
   }
 
+  // Normalize servicePackages to extras array
+  const { extras, tripPreferences } = normalizeServicePackagesToExtras(request);
+
   const normalized: NormalizedHourlyRequest = {
     bookingType: BookingType.HOURLY,
     vehicleType: request.vehicleType!,
@@ -171,7 +183,8 @@ function parseHourly(request: PricingRequestData): ParseResult {
     hours: request.hours!,
     pickup: pickup!,
     dropoff,
-    extras: request.extras || [],
+    extras,
+    tripPreferences,
     organizationId: request.organizationId,
   };
 
@@ -193,6 +206,9 @@ function parseDaily(request: PricingRequestData): ParseResult {
     return { success: false, errors };
   }
 
+  // Normalize servicePackages to extras array
+  const { extras, tripPreferences } = normalizeServicePackagesToExtras(request);
+
   const normalized: NormalizedDailyRequest = {
     bookingType: BookingType.DAILY,
     vehicleType: request.vehicleType!,
@@ -200,7 +216,8 @@ function parseDaily(request: PricingRequestData): ParseResult {
     days: request.days!,
     pickup: pickup!,
     dropoff,
-    extras: request.extras || [],
+    extras,
+    tripPreferences,
     organizationId: request.organizationId,
   };
 
@@ -222,20 +239,34 @@ function parseFleet(request: PricingRequestData): ParseResult {
   }
 
   // Determine base service type from request context
-  // For now, default to ONE_WAY (will be extended when fleet-hourly/daily are implemented)
-  const baseServiceType = BookingType.ONE_WAY;
+  // Check for hours/days to determine if FLEET+HOURLY or FLEET+DAILY
+  let baseServiceType: BookingType.ONE_WAY | BookingType.HOURLY | BookingType.DAILY;
+
+  if (request.hours != null && request.hours > 0) {
+    baseServiceType = BookingType.HOURLY;
+  } else if (request.days != null && request.days > 0) {
+    baseServiceType = BookingType.DAILY;
+  } else {
+    baseServiceType = BookingType.ONE_WAY;
+  }
+
+  // Normalize servicePackages to extras array
+  const { extras, tripPreferences } = normalizeServicePackagesToExtras(request);
 
   const normalized: NormalizedFleetRequest = {
     bookingType: BookingType.FLEET,
     baseServiceType,
     dateTime: request.dateTime,
     pickup: pickup!,
-    dropoff: dropoff!,
+    dropoff: dropoff,
     additionalStops,
     fleetConfig: request.fleetConfig!,
     distance: request.distance,
     duration: request.duration,
-    extras: request.extras || [],
+    hours: request.hours,
+    days: request.days,
+    extras,
+    tripPreferences,
     organizationId: request.organizationId,
   };
 

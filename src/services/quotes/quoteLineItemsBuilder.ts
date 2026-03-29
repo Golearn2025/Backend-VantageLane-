@@ -179,7 +179,9 @@ export function buildTripMetadata(requestData: NormalizedPricingRequest): any {
     bookingType: requestData.bookingType,
     dateTime: requestData.dateTime,
     pickup: requestData.pickup,
-    extras: requestData.extras ?? []
+    extras: requestData.extras ?? [],
+    // Keep tripPreferences separate for driver visibility (not in extras array)
+    ...(requestData.tripPreferences && { tripPreferences: requestData.tripPreferences })
   };
 
   // Add booking-type-specific fields
@@ -190,8 +192,8 @@ export function buildTripMetadata(requestData: NormalizedPricingRequest): any {
         vehicleType: requestData.vehicleType,
         dropoff: requestData.dropoff,
         additionalStops: requestData.additionalStops ?? [],
-        distance: requestData.distance ?? null,
-        duration: requestData.duration ?? null
+        distance: requestData.distance ? Math.round(requestData.distance) : null,
+        duration: requestData.duration ? Math.round(requestData.duration) : null
       };
 
     case BookingType.RETURN:
@@ -204,8 +206,8 @@ export function buildTripMetadata(requestData: NormalizedPricingRequest): any {
         returnPickup: requestData.returnPickup ?? null,
         returnDropoff: requestData.returnDropoff ?? null,
         returnAdditionalStops: requestData.returnAdditionalStops ?? [],
-        distance: requestData.distance ?? null,
-        duration: requestData.duration ?? null
+        distance: requestData.distance ? Math.round(requestData.distance) : null,
+        duration: requestData.duration ? Math.round(requestData.duration) : null
       };
 
     case BookingType.HOURLY:
@@ -233,8 +235,8 @@ export function buildTripMetadata(requestData: NormalizedPricingRequest): any {
         fleetConfig: requestData.fleetConfig,
         // NOTE: Fleet config is just vehicle counts (e.g., {EXECUTIVE: 2, LUXURY: 1})
         // Individual trip details are in the legs breakdown, not in fleetConfig
-        distance: requestData.distance ?? null,
-        duration: requestData.duration ?? null
+        distance: requestData.distance ? Math.round(requestData.distance) : null,
+        duration: requestData.duration ? Math.round(requestData.duration) : null
       };
 
     default:

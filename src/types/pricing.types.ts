@@ -110,6 +110,16 @@ export interface PricingRequestData {
 
   // Additional fields
   extras?: string[];
+  servicePackages?: {
+    includedServices?: string[];
+    premiumFeatures?: string[];
+    tripPreferences?: {
+      music?: string;
+      temperature?: string;
+      communication?: string;
+    };
+    paidUpgrades?: string[];
+  };
   corporateTier?: string;
   organizationId?: string;
 }
@@ -128,6 +138,11 @@ export interface NormalizedOneWayRequest {
   distance?: number;
   duration?: number;
   extras: string[];
+  tripPreferences?: {
+    music?: string;
+    temperature?: string;
+    communication?: string;
+  };
   organizationId?: string;
 }
 
@@ -145,6 +160,11 @@ export interface NormalizedReturnRequest {
   distance?: number; // Optional: outbound distance hint
   duration?: number; // Optional: outbound duration hint
   extras: string[];
+  tripPreferences?: {
+    music?: string;
+    temperature?: string;
+    communication?: string;
+  };
   organizationId?: string;
 }
 
@@ -156,6 +176,11 @@ export interface NormalizedHourlyRequest {
   pickup: TripPoint;
   dropoff?: TripPoint;
   extras: string[];
+  tripPreferences?: {
+    music?: string;
+    temperature?: string;
+    communication?: string;
+  };
   organizationId?: string;
 }
 
@@ -167,6 +192,11 @@ export interface NormalizedDailyRequest {
   pickup: TripPoint;
   dropoff?: TripPoint;
   extras: string[];
+  tripPreferences?: {
+    music?: string;
+    temperature?: string;
+    communication?: string;
+  };
   organizationId?: string;
 }
 
@@ -190,6 +220,11 @@ export interface NormalizedFleetRequest {
   days?: number; // Explicit days (not calculated from duration)
 
   extras: string[];
+  tripPreferences?: {
+    music?: string;
+    temperature?: string;
+    communication?: string;
+  };
   organizationId?: string;
 }
 
