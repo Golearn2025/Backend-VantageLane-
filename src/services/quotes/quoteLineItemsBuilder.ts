@@ -10,7 +10,9 @@ import {
   LegBreakdown,
   PricingBreakdownData,
   NormalizedPricingRequest,
-  BookingType
+  BookingType,
+  RouteMetrics,
+  DualQuotePricingLogic
 } from '../../types/pricing.types';
 
 export interface LineItemComponent {
@@ -59,6 +61,28 @@ export interface LineItemMeta {
     duration?: number | null;
     extras?: string[];
   }; // Trip metadata for independent quotes
+  // 🆕 NEW: Dual quote stop pricing metadata
+  route_metrics?: {
+    direct_distance_miles: number;
+    direct_duration_minutes: number;
+    full_distance_miles: number;
+    full_duration_minutes: number;
+    detour_distance_miles: number;
+    detour_duration_minutes: number;
+    calculation_method: string;
+    calculated_at: string;
+  };
+  pricing_logic?: {
+    direct_quote_pence: number;
+    full_quote_pence: number;
+    final_quote_pence: number;
+    stop_grace_applied: boolean;
+    grace_threshold_miles: number;
+    grace_threshold_minutes: number;
+    pricing_strategy: 'direct' | 'full';
+    decision_reason: string;
+    pricing_version_id?: string;
+  };
 }
 
 export interface LineItems {
@@ -71,6 +95,7 @@ export interface LineItems {
 
 /**
  * Build line items from booking-level breakdown
+ * 🆕 NEW: Accepts routeMetrics and dualQuotePricing for dual quote stop pricing
  */
 export function buildBookingLineItems(
   breakdown: PricingBreakdownData,
@@ -78,7 +103,9 @@ export function buildBookingLineItems(
   discountPence: number,
   vatPence: number,
   totalPence: number,
-  tripMetadata?: any
+  tripMetadata?: any,
+  routeMetrics?: RouteMetrics,
+  dualQuotePricing?: DualQuotePricingLogic
 ): LineItems {
   return {
     components: [
@@ -116,7 +143,31 @@ export function buildBookingLineItems(
     meta: {
       calc_source: 'pricing_engine_v2',
       calc_version: '2.0.0',
-      ...(tripMetadata && { trip: tripMetadata })
+      trip: tripMetadata,
+      // 🆕 NEW: Include route metrics if available (dual quote pricing)
+      route_metrics: routeMetrics ? {
+        direct_distance_miles: routeMetrics.directDistance || 0,
+        direct_duration_minutes: routeMetrics.directDuration || 0,
+        full_distance_miles: routeMetrics.fullDistance || 0,
+        full_duration_minutes: routeMetrics.fullDuration || 0,
+        detour_distance_miles: routeMetrics.detourDistance || 0,
+        detour_duration_minutes: routeMetrics.detourDuration || 0,
+        calculation_method: 'google_maps_api',
+        calculated_at: new Date().toISOString()
+      } : undefined,
+      // 🆕 NEW: Include pricing logic if available (dual quote pricing)
+      pricing_logic: dualQuotePricing ? {
+        direct_quote_pence: dualQuotePricing.directQuotePence,
+        full_quote_pence: dualQuotePricing.fullQuotePence,
+        final_quote_pence: dualQuotePricing.finalQuotePence,
+        stop_grace_applied: dualQuotePricing.stopGraceApplied,
+        grace_threshold_miles: dualQuotePricing.graceThresholdMiles,
+        grace_threshold_minutes: dualQuotePricing.graceThresholdMinutes,
+        pricing_strategy: dualQuotePricing.pricingStrategy,
+        decision_reason: dualQuotePricing.stopGraceApplied
+          ? `Detour within grace threshold (${dualQuotePricing.graceThresholdMiles}mi / ${dualQuotePricing.graceThresholdMinutes}min) - using direct quote`
+          : `Detour exceeds grace threshold (${dualQuotePricing.graceThresholdMiles}mi / ${dualQuotePricing.graceThresholdMinutes}min) - using full quote`
+      } : undefined
     }
   };
 }

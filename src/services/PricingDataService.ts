@@ -394,6 +394,58 @@ export class PricingDataService {
   }
 
   /**
+   * Get grace threshold configuration for dual quote stop pricing
+   * Returns threshold values from active pricing version
+   * 
+   * @returns Grace threshold in miles and minutes
+   */
+  static async getStopGraceThreshold(): Promise<{
+    miles: number;
+    minutes: number;
+  }> {
+    const cacheKey = 'stop_grace_threshold';
+    const cached = cache.get<{ miles: number; minutes: number }>(cacheKey);
+    if (cached) return cached;
+
+    const version = await this.getActivePricingVersion();
+
+    const threshold = {
+      miles: version.stop_grace_threshold_miles || 0.5,      // Default: 0.5 miles
+      minutes: version.stop_grace_threshold_minutes || 5     // Default: 5 minutes
+    };
+
+    cache.set(cacheKey, threshold);
+    return threshold;
+  }
+
+  /**
+   * Check if dual quote stop logic is enabled
+   * Priority: ENV override (emergency kill switch) > DB config (business intent)
+   * 
+   * @returns true if dual quote logic should be used, false for legacy flat fee
+   */
+  static async isDualQuoteStopLogicEnabled(): Promise<boolean> {
+    // 1. Check env override (emergency kill switch) - HIGHEST PRIORITY
+    const envOverride = process.env.DISABLE_DUAL_QUOTE_STOP_LOGIC;
+    if (envOverride === 'true') {
+      console.warn('⚠️ Dual quote stop logic DISABLED by env override (DISABLE_DUAL_QUOTE_STOP_LOGIC=true)');
+      return false;
+    }
+
+    // 2. Check DB config (business intent)
+    const version = await this.getActivePricingVersion();
+    const enabled = version.enable_dual_quote_stop_logic || false;
+
+    if (enabled) {
+      console.log('✅ Dual quote stop logic ENABLED by pricing version config');
+    } else {
+      console.log('ℹ️ Dual quote stop logic DISABLED - using legacy flat fee');
+    }
+
+    return enabled;
+  }
+
+  /**
    * Invalidate cache
    */
   static invalidateCache(key?: string): void {

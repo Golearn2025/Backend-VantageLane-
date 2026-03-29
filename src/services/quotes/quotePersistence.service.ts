@@ -62,13 +62,16 @@ export class QuotePersistenceService {
 
       // Build line items with trip metadata
       const tripMetadata = buildTripMetadata(requestData);
+      // 🆕 NEW: Pass route metrics and dual quote pricing to line items builder
       const lineItems = buildBookingLineItems(
         breakdown,
         subtotalPence,
         discountPence,
         vatPence,
         totalPence,
-        tripMetadata
+        tripMetadata,
+        pricingResult.routeMetrics,
+        pricingResult.dualQuotePricing
       );
 
       // Insert independent quote
@@ -98,6 +101,22 @@ export class QuotePersistenceService {
 
           // Line items with trip metadata
           line_items: lineItems,
+
+          // 🆕 NEW: Route metrics columns (dual quote stop pricing)
+          direct_distance_miles: pricingResult.routeMetrics?.directDistance || null,
+          direct_duration_minutes: pricingResult.routeMetrics?.directDuration ? Math.round(pricingResult.routeMetrics.directDuration) : null,
+          full_distance_miles: pricingResult.routeMetrics?.fullDistance || null,
+          full_duration_minutes: pricingResult.routeMetrics?.fullDuration ? Math.round(pricingResult.routeMetrics.fullDuration) : null,
+          detour_distance_miles: pricingResult.routeMetrics?.detourDistance || null,
+          detour_duration_minutes: pricingResult.routeMetrics?.detourDuration ? Math.round(pricingResult.routeMetrics.detourDuration) : null,
+
+          // 🆕 NEW: Pricing logic columns (dual quote stop pricing)
+          direct_quote_pence: pricingResult.dualQuotePricing?.directQuotePence || null,
+          full_quote_pence: pricingResult.dualQuotePricing?.fullQuotePence || null,
+          stop_grace_applied: pricingResult.dualQuotePricing?.stopGraceApplied || null,
+          stop_grace_threshold_miles: pricingResult.dualQuotePricing?.graceThresholdMiles || null,
+          stop_grace_threshold_minutes: pricingResult.dualQuotePricing?.graceThresholdMinutes || null,
+          stop_pricing_strategy: pricingResult.dualQuotePricing?.pricingStrategy || null,
 
           // Metadata
           calc_source: 'pricing_engine_v2',

@@ -34,6 +34,11 @@ export class QuoteService {
     try {
       console.log('🎯 Creating independent quote for organization:', organizationId);
 
+      // 🔵 DEBUG: Check if dual quote data is present
+      console.log('🔵 DEBUG - PricingResult contains:');
+      console.log('  routeMetrics:', pricingResult.routeMetrics);
+      console.log('  dualQuotePricing:', pricingResult.dualQuotePricing);
+
       // LOG: Check requestData received
       if (requestData.bookingType === 'fleet') {
         console.error('🔴 QuoteService.createIndependentQuote - FLEET requestData:');
@@ -55,13 +60,16 @@ export class QuoteService {
 
       // Build trip metadata and line items using the same code as QuotePersistenceService
       const tripMetadata = buildTripMetadata(requestData);
+      // 🆕 NEW: Pass route metrics and dual quote pricing to line items builder
       const lineItems = buildBookingLineItems(
         pricingResult.bookingBreakdown!,
         amounts.subtotalPence,
         amounts.discountPence,
         amounts.vatPence,
         amounts.totalPence,
-        tripMetadata
+        tripMetadata,
+        pricingResult.routeMetrics,
+        pricingResult.dualQuotePricing
       );
 
       // LOG 2: lineItems before insert
@@ -94,6 +102,22 @@ export class QuoteService {
 
           // Use lineItems variable
           line_items: lineItems,
+
+          // 🆕 NEW: Route metrics columns (dual quote stop pricing)
+          direct_distance_miles: pricingResult.routeMetrics?.directDistance || null,
+          direct_duration_minutes: pricingResult.routeMetrics?.directDuration || null,
+          full_distance_miles: pricingResult.routeMetrics?.fullDistance || null,
+          full_duration_minutes: pricingResult.routeMetrics?.fullDuration || null,
+          detour_distance_miles: pricingResult.routeMetrics?.detourDistance || null,
+          detour_duration_minutes: pricingResult.routeMetrics?.detourDuration || null,
+
+          // 🆕 NEW: Pricing logic columns (dual quote stop pricing)
+          direct_quote_pence: pricingResult.dualQuotePricing?.directQuotePence || null,
+          full_quote_pence: pricingResult.dualQuotePricing?.fullQuotePence || null,
+          stop_grace_applied: pricingResult.dualQuotePricing?.stopGraceApplied || null,
+          stop_grace_threshold_miles: pricingResult.dualQuotePricing?.graceThresholdMiles || null,
+          stop_grace_threshold_minutes: pricingResult.dualQuotePricing?.graceThresholdMinutes || null,
+          stop_pricing_strategy: pricingResult.dualQuotePricing?.pricingStrategy || null,
 
           // Metadata
           calc_source: 'pricing_engine_v2',
@@ -318,14 +342,33 @@ export class QuoteService {
         services_discount_pence: 0,
 
         // Delegate line items building to builder
+        // 🆕 NEW: Pass route metrics and dual quote pricing
         line_items: buildBookingLineItems(
           pricingResult.bookingBreakdown!,
           amounts.subtotalPence,
           amounts.discountPence,
           amounts.vatPence,
           amounts.totalPence,
-          tripMetadata
+          tripMetadata,
+          pricingResult.routeMetrics,
+          pricingResult.dualQuotePricing
         ),
+
+        // 🆕 NEW: Route metrics columns (dual quote stop pricing)
+        direct_distance_miles: pricingResult.routeMetrics?.directDistance || null,
+        direct_duration_minutes: pricingResult.routeMetrics?.directDuration || null,
+        full_distance_miles: pricingResult.routeMetrics?.fullDistance || null,
+        full_duration_minutes: pricingResult.routeMetrics?.fullDuration || null,
+        detour_distance_miles: pricingResult.routeMetrics?.detourDistance || null,
+        detour_duration_minutes: pricingResult.routeMetrics?.detourDuration || null,
+
+        // 🆕 NEW: Pricing logic columns (dual quote stop pricing)
+        direct_quote_pence: pricingResult.dualQuotePricing?.directQuotePence || null,
+        full_quote_pence: pricingResult.dualQuotePricing?.fullQuotePence || null,
+        stop_grace_applied: pricingResult.dualQuotePricing?.stopGraceApplied || null,
+        stop_grace_threshold_miles: pricingResult.dualQuotePricing?.graceThresholdMiles || null,
+        stop_grace_threshold_minutes: pricingResult.dualQuotePricing?.graceThresholdMinutes || null,
+        stop_pricing_strategy: pricingResult.dualQuotePricing?.pricingStrategy || null,
 
         calc_source: 'pricing_engine_v2',
         calc_version: '2.0.0',

@@ -15,11 +15,14 @@ import {
   PricingBreakdownData,
   PricingDetail,
   BookingType,
+  RouteMetrics as RouteMetricsType,
+  DualQuotePricingLogic,
 } from '../types/pricing.types';
-import { normalizeRoute, calculateRouteMetrics, RouteMetrics } from '../normalizers/routeNormalizer';
+import { normalizeRoute, calculateRouteMetrics, RouteMetrics, NormalizedRoute } from '../normalizers/routeNormalizer';
 import { buildOneWayLeg, validateOperationalLeg, OperationalLeg } from '../builders/legBuilder';
 import { FeeCalculators } from '../services/FeeCalculators';
 import { PricingDataService } from '../services/PricingDataService';
+import { RouteCalculationService } from '../services/RouteCalculationService';
 
 export interface OneWayPricingContext {
   request: NormalizedOneWayRequest;
@@ -35,6 +38,8 @@ export async function handleOneWayPricing(
   const { request } = context;
 
   try {
+    console.log('🔵 handleOneWayPricing CALLED - checking dual quote logic...');
+
     // 1. Normalize route
     const route = normalizeRoute(request.pickup, request.dropoff, request.additionalStops);
 
@@ -55,29 +60,85 @@ export async function handleOneWayPricing(
       };
     }
 
-    // 5. Calculate pricing for the leg
-    const legBreakdown = await calculateLegPricing(operationalLeg, request, metrics);
+    // 5. Check if dual quote stop logic is enabled and applicable
+    console.log('🔍 Checking dual quote feature flag...');
+    const isDualQuoteEnabled = await PricingDataService.isDualQuoteStopLogicEnabled();
+    const hasStops = request.additionalStops && request.additionalStops.length > 0;
+    console.log(`🎯 isDualQuoteEnabled: ${isDualQuoteEnabled}, hasStops: ${hasStops}`);
 
-    // 6. Build booking-level breakdown (for ONE_WAY, same as leg breakdown)
-    const bookingBreakdown: PricingBreakdownData = {
-      baseFare: legBreakdown.pricing.baseFare,
-      distanceFee: legBreakdown.pricing.distanceFee,
-      timeFee: legBreakdown.pricing.timeFee,
-      airportFees: legBreakdown.pricing.airportFees,
-      zoneFees: legBreakdown.pricing.zoneFees,
-      tollFees: legBreakdown.pricing.tollFees,
-      multiStopFees: legBreakdown.pricing.multiStopFee,
-      waitingFees: legBreakdown.pricing.waitingFees,
-      serviceItemFees: legBreakdown.pricing.serviceItemFees,
-      subtotal: legBreakdown.pricing.subtotal,
-      multipliers: legBreakdown.pricing.multipliers,
-      discounts: {
-        total: legBreakdown.pricing.discount,
-        corporateDiscount: legBreakdown.pricing.discount > 0 ? legBreakdown.pricing.discount : undefined,
-      },
-      finalPrice: legBreakdown.pricing.finalPrice,
-      details: legBreakdown.pricing.details,
-    };
+    let bookingBreakdown: PricingBreakdownData;
+    let routeMetrics: RouteMetricsType | undefined;
+    let dualQuotePricing: DualQuotePricingLogic | undefined;
+    let legBreakdown: LegBreakdown;
+
+    if (isDualQuoteEnabled && hasStops) {
+      // 🆕 NEW: Use dual quote stop pricing logic
+      console.log('✅ Using dual quote stop pricing logic');
+      const dualQuoteResult = await calculateDualQuoteStopPricing(request, route, metrics);
+
+      bookingBreakdown = dualQuoteResult.finalBreakdown;
+      routeMetrics = dualQuoteResult.routeMetrics;
+      dualQuotePricing = dualQuoteResult.dualQuotePricing;
+
+      // Build leg breakdown from final breakdown
+      legBreakdown = {
+        leg_number: 1,
+        leg_kind: 'main',
+        pickup: request.pickup,
+        dropoff: request.dropoff,
+        scheduled_at: request.dateTime,
+        distance_miles: metrics.totalDistance,
+        duration_min: metrics.totalDuration,
+        stops: request.additionalStops,
+        pricing: {
+          baseFare: bookingBreakdown.baseFare,
+          distanceFee: bookingBreakdown.distanceFee,
+          timeFee: bookingBreakdown.timeFee,
+          multiStopFee: bookingBreakdown.multiStopFees,
+          waitingFees: bookingBreakdown.waitingFees,
+          airportFees: bookingBreakdown.airportFees,
+          zoneFees: bookingBreakdown.zoneFees,
+          tollFees: bookingBreakdown.tollFees,
+          serviceItemFees: bookingBreakdown.serviceItemFees,
+          subtotal: bookingBreakdown.subtotal,
+          multipliers: bookingBreakdown.multipliers,
+          discount: bookingBreakdown.discounts.total,
+          finalPrice: bookingBreakdown.finalPrice,
+          details: bookingBreakdown.details,
+        },
+        platformFee: 0,
+        operatorNet: bookingBreakdown.finalPrice,
+        driverPayout: 0,
+      };
+    } else {
+      // ⚙️ LEGACY: Use traditional flat fee pricing
+      if (!isDualQuoteEnabled && hasStops) {
+        console.log('ℹ️ Using legacy flat fee multi-stop pricing');
+      }
+
+      legBreakdown = await calculateLegPricing(operationalLeg, request, metrics);
+
+      // Build booking-level breakdown (for ONE_WAY, same as leg breakdown)
+      bookingBreakdown = {
+        baseFare: legBreakdown.pricing.baseFare,
+        distanceFee: legBreakdown.pricing.distanceFee,
+        timeFee: legBreakdown.pricing.timeFee,
+        airportFees: legBreakdown.pricing.airportFees,
+        zoneFees: legBreakdown.pricing.zoneFees,
+        tollFees: legBreakdown.pricing.tollFees,
+        multiStopFees: legBreakdown.pricing.multiStopFee,
+        waitingFees: legBreakdown.pricing.waitingFees,
+        serviceItemFees: legBreakdown.pricing.serviceItemFees,
+        subtotal: legBreakdown.pricing.subtotal,
+        multipliers: legBreakdown.pricing.multipliers,
+        discounts: {
+          total: legBreakdown.pricing.discount,
+          corporateDiscount: legBreakdown.pricing.discount > 0 ? legBreakdown.pricing.discount : undefined,
+        },
+        finalPrice: legBreakdown.pricing.finalPrice,
+        details: legBreakdown.pricing.details,
+      };
+    }
 
     // 7. Get pricing version ID
     const activePricingVersion = await PricingDataService.getActivePricingVersion();
@@ -98,6 +159,9 @@ export async function handleOneWayPricing(
         additionalStops: route.stops,
         dropoff: route.dropoff,
       },
+      // 🆕 NEW: Include dual quote pricing data if available
+      routeMetrics,
+      dualQuotePricing,
       timestamp: new Date().toISOString(),
     };
   } catch (error) {
@@ -112,11 +176,13 @@ export async function handleOneWayPricing(
 
 /**
  * Calculate pricing for a single operational leg
+ * @param skipMultiStopFee - If true, skip multi-stop fee calculation (for direct quote)
  */
 async function calculateLegPricing(
   leg: OperationalLeg,
   request: NormalizedOneWayRequest,
-  metrics: RouteMetrics
+  metrics: RouteMetrics,
+  skipMultiStopFee: boolean = false
 ): Promise<LegBreakdown> {
   // Initialize breakdown structure matching PricingBreakdownData exactly
   const breakdown: PricingBreakdownData = {
@@ -170,8 +236,9 @@ async function calculateLegPricing(
   }
 
   // Calculate multi-stop fee (NEW: based on additionalStops.length, not extras)
-  // NOTE: This replaces the old multi_stop extras flag - ensure no duplication in FeeCalculators
-  if (request.additionalStops.length > 0) {
+  // Multi-stop fee applies when there are intermediate stops between pickup and dropoff
+  // Can be skipped for dual quote direct route calculation
+  if (!skipMultiStopFee && request.additionalStops && request.additionalStops.length > 0) {
     await calculateMultiStopFee(breakdown, request.additionalStops.length, request.vehicleType, request.organizationId);
   }
 
@@ -233,6 +300,140 @@ async function calculateLegPricing(
   };
 
   return legBreakdown;
+}
+
+/**
+ * 🆕 NEW: Dual quote stop pricing with grace threshold
+ * 
+ * Strategy:
+ * 1. Calculate direct route (pickup → dropoff, no stops)
+ * 2. Calculate full route (pickup → stops → dropoff)
+ * 3. Calculate detour (full - direct)
+ * 4. Calculate direct quote (no multi-stop fee)
+ * 5. Calculate full quote (with multi-stop fee)
+ * 6. Apply grace threshold:
+ *    - If detour < threshold → use direct quote
+ *    - If detour >= threshold → use full quote
+ * 7. Return final quote with metadata
+ */
+async function calculateDualQuoteStopPricing(
+  request: NormalizedOneWayRequest,
+  route: NormalizedRoute,
+  fullMetrics: RouteMetrics
+): Promise<{
+  routeMetrics: RouteMetricsType;
+  dualQuotePricing: DualQuotePricingLogic;
+  finalBreakdown: PricingBreakdownData;
+}> {
+  // 1. Calculate direct route metrics (no stops)
+  const directMetrics = await RouteCalculationService.calculateDirectRoute(
+    request.pickup,
+    request.dropoff
+  );
+
+  // 2. Calculate detour
+  // Convert RouteMetrics to RouteMetricsResult for comparison
+  const fullMetricsResult = {
+    totalDistance: fullMetrics.totalDistance || 0,
+    totalDuration: fullMetrics.totalDuration || 0,
+    segments: [],
+    source: 'google_maps' as const
+  };
+  const detour = RouteCalculationService.calculateDetourMetrics(
+    directMetrics,
+    fullMetricsResult
+  );
+
+  // 3. Get grace threshold config
+  const graceThreshold = await PricingDataService.getStopGraceThreshold();
+
+  // 4. Build operational leg for direct route (no stops)
+  const directRoute: NormalizedRoute = {
+    ...route,
+    stops: [],
+    totalStops: 0,
+    segments: route.segments.filter(seg =>
+      seg.from.type === 'pickup' && seg.to.type === 'dropoff'
+    )
+  };
+  const directLeg = buildOneWayLeg(request, directRoute);
+
+  // 5. Calculate direct quote (no multi-stop fee)
+  // Convert RouteMetricsResult to RouteMetrics format expected by calculateLegPricing
+  const directMetricsForPricing: RouteMetrics = {
+    totalDistance: directMetrics.totalDistance,
+    totalDuration: directMetrics.totalDuration,
+    segmentCount: 1,
+    metricsSource: 'computed'  // Direct route metrics are computed
+  };
+  const directBreakdown = await calculateLegPricing(
+    directLeg,
+    { ...request, additionalStops: [] },  // No stops
+    directMetricsForPricing,
+    true  // skipMultiStopFee = true
+  );
+
+  // 6. Build operational leg for full route (with stops)
+  const fullLeg = buildOneWayLeg(request, route);
+
+  // 7. Calculate full quote (with multi-stop fee)
+  const fullBreakdown = await calculateLegPricing(
+    fullLeg,
+    request,
+    fullMetrics,
+    false  // skipMultiStopFee = false (calculate multi-stop fee)
+  );
+
+  // 8. Apply grace threshold logic
+  const detourExceedsThreshold =
+    detour.detourDistance > graceThreshold.miles ||
+    detour.detourDuration > graceThreshold.minutes;
+
+  const stopGraceApplied = !detourExceedsThreshold;
+
+  // Select final breakdown based on grace threshold decision
+  const selectedBreakdown = stopGraceApplied ? directBreakdown : fullBreakdown;
+  const finalBreakdown: PricingBreakdownData = {
+    baseFare: selectedBreakdown.pricing.baseFare,
+    distanceFee: selectedBreakdown.pricing.distanceFee,
+    timeFee: selectedBreakdown.pricing.timeFee,
+    airportFees: selectedBreakdown.pricing.airportFees,
+    zoneFees: selectedBreakdown.pricing.zoneFees,
+    tollFees: selectedBreakdown.pricing.tollFees,
+    multiStopFees: selectedBreakdown.pricing.multiStopFee,
+    waitingFees: selectedBreakdown.pricing.waitingFees,
+    serviceItemFees: selectedBreakdown.pricing.serviceItemFees,
+    subtotal: selectedBreakdown.pricing.subtotal,
+    multipliers: selectedBreakdown.pricing.multipliers,
+    discounts: {
+      total: selectedBreakdown.pricing.discount,
+      corporateDiscount: selectedBreakdown.pricing.discount > 0 ? selectedBreakdown.pricing.discount : undefined,
+    },
+    finalPrice: selectedBreakdown.pricing.finalPrice,
+    details: selectedBreakdown.pricing.details,
+  };
+
+  // 9. Build result
+  return {
+    routeMetrics: {
+      directDistance: directMetrics.totalDistance,
+      directDuration: directMetrics.totalDuration,
+      fullDistance: fullMetrics.totalDistance,
+      fullDuration: fullMetrics.totalDuration,
+      detourDistance: detour.detourDistance,
+      detourDuration: detour.detourDuration
+    },
+    dualQuotePricing: {
+      directQuotePence: Math.round(directBreakdown.pricing.finalPrice * 100),
+      fullQuotePence: Math.round(fullBreakdown.pricing.finalPrice * 100),
+      finalQuotePence: Math.round(finalBreakdown.finalPrice * 100),
+      stopGraceApplied,
+      graceThresholdMiles: graceThreshold.miles,
+      graceThresholdMinutes: graceThreshold.minutes,
+      pricingStrategy: stopGraceApplied ? 'direct' : 'full'
+    },
+    finalBreakdown
+  };
 }
 
 /**

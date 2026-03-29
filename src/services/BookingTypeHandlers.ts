@@ -31,13 +31,14 @@ export class BookingTypeHandlers {
     breakdown.subtotal = breakdown.subtotal * 2;
 
     // Apply return discount
-    const discountAmount = breakdown.subtotal * returnSettings.discount_rate;
-    breakdown.discounts += discountAmount;
-    breakdown.subtotal -= discountAmount;
+    const returnDiscountRate = 0.10; // 10% discount
+    const returnDiscount = breakdown.subtotal * returnDiscountRate;
+    breakdown.discounts.total += returnDiscount;
+    breakdown.subtotal -= returnDiscount;
 
     breakdown.details.push({
       component: 'return_discount',
-      amount: -discountAmount,
+      amount: -returnDiscount,
       description: `Return trip discount (${(returnSettings.discount_rate * 100).toFixed(0)}%)`
     });
   }
@@ -130,7 +131,7 @@ export class BookingTypeHandlers {
     }
 
     breakdown.subtotal = fleetSubtotal - fleetDiscount;
-    breakdown.discounts += fleetDiscount;
+    breakdown.discounts.total += fleetDiscount;
   }
 
   /**
@@ -150,9 +151,9 @@ export class BookingTypeHandlers {
     // Outbound leg
     const outboundLeg: LegBreakdown = {
       leg_number: 1,
-      leg_type: 'outbound',
-      pickup_location: request.pickup,
-      destination: request.dropoff,
+      leg_kind: 'main',
+      pickup: request.pickup,
+      dropoff: request.dropoff,
       scheduled_at: request.dateTime,
       distance_miles: request.distance ? request.distance * 0.621371 : undefined,
       duration_min: request.duration,
@@ -160,12 +161,17 @@ export class BookingTypeHandlers {
         baseFare: breakdown.baseFare / 2,
         distanceFee: breakdown.distanceFee / 2,
         timeFee: breakdown.timeFee / 2,
+        multiStopFee: 0,
+        waitingFees: 0,
         airportFees: breakdown.airportFees / 2,
         zoneFees: breakdown.zoneFees / 2,
         tollFees: breakdown.tollFees / 2,
         serviceItemFees: breakdown.serviceItemFees / 2,
         subtotal: breakdown.subtotal / 2,
-        leg_price: pricePerLeg
+        multipliers: {},
+        discount: 0,
+        finalPrice: pricePerLeg,
+        details: []
       },
       platform_fee: pricePerLeg * platformRate,
       operator_net: pricePerLeg * (1 - platformRate),
@@ -175,9 +181,9 @@ export class BookingTypeHandlers {
     // Return leg
     const returnLeg: LegBreakdown = {
       leg_number: 2,
-      leg_type: 'return',
-      pickup_location: request.dropoff,
-      destination: request.pickup,
+      leg_kind: 'return',
+      pickup: request.dropoff,
+      dropoff: request.pickup,
       scheduled_at: request.dateTime, // Would be adjusted for actual return time
       distance_miles: request.distance ? request.distance * 0.621371 : undefined,
       duration_min: request.duration,
@@ -185,12 +191,17 @@ export class BookingTypeHandlers {
         baseFare: breakdown.baseFare / 2,
         distanceFee: breakdown.distanceFee / 2,
         timeFee: breakdown.timeFee / 2,
+        multiStopFee: 0,
+        waitingFees: 0,
         airportFees: breakdown.airportFees / 2,
         zoneFees: breakdown.zoneFees / 2,
         tollFees: breakdown.tollFees / 2,
         serviceItemFees: breakdown.serviceItemFees / 2,
         subtotal: breakdown.subtotal / 2,
-        leg_price: pricePerLeg
+        multipliers: {},
+        discount: 0,
+        finalPrice: pricePerLeg,
+        details: []
       },
       platform_fee: pricePerLeg * platformRate,
       operator_net: pricePerLeg * (1 - platformRate),
@@ -259,11 +270,11 @@ export class BookingTypeHandlers {
       for (let i = 1; i <= count; i++) {
         const leg: LegBreakdown = {
           leg_number: legNumber++,
-          leg_type: 'vehicle',
-          vehicle_category: category,
-          vehicle_index: i,
-          pickup_location: request.pickup,
-          destination: request.dropoff,
+          leg_kind: 'fleet_item',
+          vehicle_category: vehicleType,
+          vehicle_unit_index: i,
+          pickup: request.pickup,
+          dropoff: request.dropoff,
           scheduled_at: request.dateTime,
           distance_miles: request.distance ? request.distance * 0.621371 : undefined,
           duration_min: request.duration,
@@ -275,12 +286,17 @@ export class BookingTypeHandlers {
               BookingType.ONE_WAY
             ) : 0,
             timeFee: request.duration ? request.duration * PricingDataService.penceToPounds(rates.per_minute_pence) : 0,
-            airportFees: 0, // Split proportionally if needed
+            airportFees: 0,
             zoneFees: 0,
             tollFees: 0,
             serviceItemFees: 0,
+            multiStopFee: 0,
+            waitingFees: 0,
             subtotal: vehiclePrice,
-            leg_price: vehiclePrice
+            multipliers: {},
+            discount: 0,
+            finalPrice: vehiclePrice,
+            details: []
           },
           platform_fee: vehiclePrice * platformRate,
           operator_net: vehiclePrice * (1 - platformRate),
@@ -292,7 +308,7 @@ export class BookingTypeHandlers {
 
       // Add to summary
       summary.push({
-        category: category,
+        category: vehicleType,
         count: count,
         unit_price: vehiclePrice,
         total: vehiclePrice * count
@@ -309,8 +325,7 @@ export class BookingTypeHandlers {
     const map: Record<string, VehicleType> = {
       'EXEC': VehicleType.EXECUTIVE,
       'LUX': VehicleType.LUXURY,
-      'SUV': VehicleType.SUV,
-      'VAN': VehicleType.VAN
+      'SUV': VehicleType.SUV
     };
     return map[category] || VehicleType.EXECUTIVE;
   }

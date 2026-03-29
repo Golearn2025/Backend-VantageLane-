@@ -24,6 +24,9 @@ export class FeeCalculators {
    * Reads from: v_pricing_vehicle_rates
    */
   static async calculateBaseFare(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
+    if (!request.vehicleType) {
+      throw new Error('Vehicle type is required for base fare calculation');
+    }
     const rates = await PricingDataService.getVehicleRates(
       request.vehicleType,
       request.bookingType,
@@ -45,6 +48,9 @@ export class FeeCalculators {
    * Reads from: v_pricing_hourly_rules
    */
   static async calculateHourlyFee(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
+    if (!request.vehicleType) {
+      throw new Error('Vehicle type is required for hourly fee calculation');
+    }
     const requestedHours = request.hours || 3;
 
     const hourlyRules = await PricingDataService.getHourlyRules(request.vehicleType, request.organizationId);
@@ -73,6 +79,9 @@ export class FeeCalculators {
    * Reads from: v_pricing_daily_rules
    */
   static async calculateDailyFee(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
+    if (!request.vehicleType) {
+      throw new Error('Vehicle type is required for daily fee calculation');
+    }
     const requestedDays = request.days || 1;
 
     const dailyRules = await PricingDataService.getDailyRules(request.vehicleType, request.organizationId);
@@ -101,6 +110,11 @@ export class FeeCalculators {
    */
   static async calculateDistanceFee(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
     if (!request.distance) return;
+    if (!request.vehicleType) {
+      throw new Error('Vehicle type is required for distance fee calculation');
+    }
+
+    const distanceMiles = request.distance * 0.621371; // Convert km to miles
 
     const rates = await PricingDataService.getVehicleRates(
       request.vehicleType,
@@ -137,6 +151,9 @@ export class FeeCalculators {
    */
   static async calculateTimeFee(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
     if (!request.duration) return;
+    if (!request.vehicleType) {
+      throw new Error('Vehicle type is required for time fee calculation');
+    }
 
     const rates = await PricingDataService.getVehicleRates(
       request.vehicleType,
@@ -352,7 +369,7 @@ export class FeeCalculators {
 
       if (discountRate > 0) {
         const discountAmount = breakdown.subtotal * discountRate;
-        breakdown.discounts += discountAmount;
+        breakdown.discounts.total += discountAmount;
 
         breakdown.details.push({
           component: 'corporate_discount',
@@ -368,6 +385,9 @@ export class FeeCalculators {
    * Reads from: v_pricing_vehicle_rates
    */
   static async applyMinimumFare(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
+    if (!request.vehicleType) {
+      throw new Error('Vehicle type is required for minimum fare calculation');
+    }
     const rates = await PricingDataService.getVehicleRates(
       request.vehicleType,
       request.bookingType,

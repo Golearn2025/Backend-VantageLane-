@@ -451,11 +451,38 @@ export interface FleetCategorySummary {
   total: number;
 }
 
+/**
+ * Route metrics for dual quote stop pricing
+ * Compares direct route (pickup → dropoff) vs full route (with stops)
+ */
+export interface RouteMetrics {
+  directDistance?: number;      // Miles - pickup → dropoff (no stops)
+  directDuration?: number;       // Minutes - pickup → dropoff (no stops)
+  fullDistance?: number;         // Miles - full route (with all stops)
+  fullDuration?: number;         // Minutes - full route (with all stops)
+  detourDistance?: number;       // Miles - difference (full - direct)
+  detourDuration?: number;       // Minutes - difference (full - direct)
+}
+
+/**
+ * Dual quote pricing logic decision and audit trail
+ * Stores both direct and full quotes, plus the final decision
+ */
+export interface DualQuotePricingLogic {
+  directQuotePence: number;      // Quote for direct route (no stops)
+  fullQuotePence: number;        // Quote for full route (with stops)
+  finalQuotePence: number;       // Final quote selected
+  stopGraceApplied: boolean;     // True if detour under threshold
+  graceThresholdMiles: number;   // Threshold distance used (e.g., 0.5)
+  graceThresholdMinutes: number; // Threshold time used (e.g., 5)
+  pricingStrategy: 'direct' | 'full'; // Which strategy was chosen
+}
+
 export interface PricingResult {
   success: boolean;
   finalPrice?: number; // Shortcut/convenience - same as bookingBreakdown.finalPrice
   currency?: string;
-  pricing_version_id?: string; // UUID of pricing version used
+  pricing_version_id?: string | null; // UUID of pricing version used
 
   // Booking-level breakdown
   bookingBreakdown?: PricingBreakdownData;
@@ -481,6 +508,10 @@ export interface PricingResult {
 
   // Legacy compatibility (deprecated - use bookingBreakdown)
   details?: PricingDetail[];
+
+  // NEW: Dual quote stop pricing data
+  routeMetrics?: RouteMetrics;
+  dualQuotePricing?: DualQuotePricingLogic;
 
   error?: string;
   code?: number;

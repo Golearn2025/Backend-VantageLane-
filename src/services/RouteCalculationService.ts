@@ -8,8 +8,8 @@
  * not just flat rates + stop fees
  */
 
-import { RouteSegment } from '../normalizers/routeNormalizer';
-import { Coordinates } from '../types/pricing.types';
+import { Coordinates, TripPoint } from '../types/pricing.types';
+import { RouteSegment, RoutePoint } from '../normalizers/routeNormalizer';
 
 export interface RouteMetricsResult {
   totalDistance: number; // miles
@@ -182,9 +182,9 @@ export class RouteCalculationService {
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
       Math.cos(this.toRadians(coord1.lat)) *
-        Math.cos(this.toRadians(coord2.lat)) *
-        Math.sin(dLng / 2) *
-        Math.sin(dLng / 2);
+      Math.cos(this.toRadians(coord2.lat)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
 
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
@@ -214,5 +214,48 @@ export class RouteCalculationService {
       return null;
     }
     return `${coords.lat},${coords.lng}`;
+  }
+
+  /**
+   * Calculate direct route metrics (pickup → dropoff, ignoring stops)
+   * Used for dual quote stop pricing logic to compare against full route
+   * 
+   * @param pickup - Starting point
+   * @param dropoff - Ending point
+   * @returns RouteMetricsResult with direct route distance and duration
+   */
+  static async calculateDirectRoute(
+    pickup: TripPoint,
+    dropoff: TripPoint
+  ): Promise<RouteMetricsResult> {
+    // Build single segment: pickup → dropoff (no stops)
+    const directSegment: RouteSegment = {
+      segmentIndex: 0,
+      from: { point: pickup, index: 0, type: 'pickup' },
+      to: { point: dropoff, index: 1, type: 'dropoff' }
+    };
+
+    // Calculate metrics for direct segment using existing logic
+    return await this.calculateRouteMetrics([directSegment]);
+  }
+
+  /**
+   * Calculate detour metrics by comparing direct vs full route
+   * 
+   * @param directMetrics - Metrics for direct route (pickup → dropoff)
+   * @param fullMetrics - Metrics for full route (with stops)
+   * @returns Detour distance and duration (full - direct)
+   */
+  static calculateDetourMetrics(
+    directMetrics: RouteMetricsResult,
+    fullMetrics: RouteMetricsResult
+  ): {
+    detourDistance: number;
+    detourDuration: number;
+  } {
+    return {
+      detourDistance: Math.max(0, fullMetrics.totalDistance - directMetrics.totalDistance),
+      detourDuration: Math.max(0, fullMetrics.totalDuration - directMetrics.totalDuration)
+    };
   }
 }

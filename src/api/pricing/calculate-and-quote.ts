@@ -50,9 +50,9 @@ export async function calculateAndQuote(req: Request, res: Response) {
       });
     }
 
-    // Step 2: Parse request into normalized format
-    console.log('🔄 Parsing pricing request...');
+    // Step 2: Parse and normalize request
     const parseResult = parsePricingRequest(requestData);
+
     if (!parseResult.success || !parseResult.data) {
       return res.status(400).json({
         success: false,
@@ -62,6 +62,9 @@ export async function calculateAndQuote(req: Request, res: Response) {
     }
 
     const normalizedRequest = parseResult.data;
+
+    // LOG 1: Immediately after parser
+    console.error('� LOG 1 - AFTER PARSER normalizedRequest =', JSON.stringify(normalizedRequest, null, 2));
 
     // Step 3: Calculate pricing using PricingEngine with normalized request
     console.log('📊 Calculating pricing...');
@@ -83,6 +86,10 @@ export async function calculateAndQuote(req: Request, res: Response) {
 
     // Step 4: Create independent quote (Phase 2A)
     console.log('📝 Creating independent quote...');
+
+    // LOG 1: Immediately before createIndependentQuote
+    console.error('🔴 LOG 1 - BEFORE createIndependentQuote normalizedRequest =', JSON.stringify(normalizedRequest, null, 2));
+
     const quoteResult = await QuotePersistenceService.createIndependentQuote(
       pricingResult,
       normalizedRequest,

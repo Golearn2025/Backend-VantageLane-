@@ -221,10 +221,10 @@ async function calculateLegPricing(
     dateTime: legType === 'outbound' ? request.dateTime : request.returnDateTime,
     pickup: toTripPointInput(leg.pickup),
     dropoff: toTripPointInput(leg.dropoff),
-    additionalStops: leg.stops.map(toTripPointInput),
+    additionalStops: (leg.stops || []).map(toTripPointInput),
     distance: metrics.totalDistance,
     duration: metrics.totalDuration,
-    extras: request.extras.filter(e => e !== 'multi_stop'),
+    extras: (request.extras || []).filter(e => e !== 'multi_stop'),
     organizationId: request.organizationId,
   };
 
@@ -244,7 +244,7 @@ async function calculateLegPricing(
   }
 
   // Calculate multi-stop fee
-  if (leg.stops.length > 0) {
+  if (leg.stops && leg.stops.length > 0) {
     await calculateMultiStopFee(
       breakdown,
       leg.stops.length,

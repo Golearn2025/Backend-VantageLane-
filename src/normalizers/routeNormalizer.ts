@@ -40,7 +40,7 @@ export interface NormalizedRoute {
 export function normalizeRoute(
   pickup: TripPoint,
   dropoff: TripPoint,
-  additionalStops: TripPoint[] = []
+  additionalStops?: TripPoint[]
 ): NormalizedRoute {
   // Clean and validate stops
   const cleanedStops = cleanStops(additionalStops);
@@ -230,7 +230,11 @@ export function formatRoute(route: NormalizedRoute): string {
  * - Trims addresses
  * - Filters out null/undefined entries
  */
-function cleanStops(stops: TripPoint[]): TripPoint[] {
+function cleanStops(stops: TripPoint[] | undefined): TripPoint[] {
+  if (!stops || !Array.isArray(stops)) {
+    return [];
+  }
+
   return stops
     .filter((stop) => {
       // Remove null/undefined
