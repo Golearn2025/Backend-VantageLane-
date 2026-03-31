@@ -517,3 +517,46 @@ export interface PricingResult {
   code?: number;
   timestamp: string;
 }
+
+/**
+ * Leg snapshot data persisted in quote JSON
+ * Used to reconstruct client_leg_quotes during conversion
+ * Source of truth for per-leg pricing in multi-leg bookings
+ */
+export interface LegSnapshotData {
+  leg_number: number;
+  leg_kind: 'main' | 'return' | 'fleet_item';
+  vehicle_category?: string;
+  vehicle_unit_index?: number;
+
+  // Operational data
+  pickup?: TripPoint;
+  dropoff?: TripPoint;
+  stops?: TripPoint[];
+  scheduled_at?: string;
+  distance_miles?: number;
+  duration_min?: number;
+
+  // Pricing breakdown in PENCE (not pounds!)
+  pricing: {
+    base_fare_pence: number;
+    distance_fee_pence: number;
+    time_fee_pence: number;
+    multi_stop_fee_pence: number;
+    waiting_fees_pence: number;
+    airport_fees_pence: number;
+    zone_fees_pence: number;
+    toll_fees_pence: number;
+    service_item_fees_pence: number;
+    subtotal_pence: number;
+    discount_pence: number;
+    vat_pence: number;  // Currently 0 per leg, VAT calculated at booking level
+    total_pence: number;
+    multipliers?: Record<string, number>;
+    details?: Array<{
+      component: string;
+      amount_pence: number;
+      description: string;
+    }>;
+  };
+}

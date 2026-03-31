@@ -41,8 +41,10 @@ export async function calculateAndQuote(req: Request, res: Response) {
 
     // Step 1: Validate request using new validator
     console.log('✅ Validating pricing request...');
+    console.log('📋 Request data:', JSON.stringify(requestData, null, 2));
     const validationResult = validatePricingRequest(requestData);
     if (!validationResult.valid) {
+      console.error('❌ VALIDATION FAILED:', JSON.stringify(validationResult.errors, null, 2));
       return res.status(400).json({
         success: false,
         error: 'Validation failed',

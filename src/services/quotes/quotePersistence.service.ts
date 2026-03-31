@@ -62,7 +62,7 @@ export class QuotePersistenceService {
 
       // Build line items with trip metadata
       const tripMetadata = buildTripMetadata(requestData);
-      // 🆕 NEW: Pass route metrics and dual quote pricing to line items builder
+      // 🆕 NEW: Pass route metrics, dual quote pricing, and legs to line items builder
       const lineItems = buildBookingLineItems(
         breakdown,
         subtotalPence,
@@ -71,7 +71,8 @@ export class QuotePersistenceService {
         totalPence,
         tripMetadata,
         pricingResult.routeMetrics,
-        pricingResult.dualQuotePricing
+        pricingResult.dualQuotePricing,
+        pricingResult.legs  // 🆕 NEW: Pass legs array for multi-leg bookings
       );
 
       // Insert independent quote

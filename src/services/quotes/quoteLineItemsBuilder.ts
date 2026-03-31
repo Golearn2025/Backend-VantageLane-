@@ -43,6 +43,7 @@ export interface LineItemSummary {
 export interface LineItemMeta {
   calc_source: string;
   calc_version: string;
+  snapshot_format?: 'booking_only_v1' | 'booking_and_legs_v1';
   trip?: {
     bookingType: string;
     vehicleType?: string;
@@ -83,6 +84,8 @@ export interface LineItemMeta {
     decision_reason: string;
     pricing_version_id?: string;
   };
+  // 🆕 NEW: Legs snapshot for multi-leg bookings (RETURN, FLEET)
+  legs?: import('../../types/pricing.types').LegSnapshotData[];
 }
 
 export interface LineItems {
@@ -105,8 +108,13 @@ export function buildBookingLineItems(
   totalPence: number,
   tripMetadata?: any,
   routeMetrics?: RouteMetrics,
-  dualQuotePricing?: DualQuotePricingLogic
+  dualQuotePricing?: DualQuotePricingLogic,
+  legs?: LegBreakdown[]  // 🆕 NEW: Optional legs parameter for multi-leg bookings
 ): LineItems {
+  // Validate legs data consistency if provided
+  if (legs && legs.length > 0) {
+    validateLegsData(legs, subtotalPence, discountPence, totalPence);
+  }
   return {
     components: [
       { code: 'base_fare', label: 'Base fare', amount_pence: Math.round(breakdown.baseFare * 100) },
@@ -142,7 +150,8 @@ export function buildBookingLineItems(
 
     meta: {
       calc_source: 'pricing_engine_v2',
-      calc_version: '2.0.0',
+      calc_version: '2.1.0',  // Bump version for legs snapshot support
+      snapshot_format: legs && legs.length > 0 ? 'booking_and_legs_v1' : 'booking_only_v1',
       trip: tripMetadata,
       // 🆕 NEW: Include route metrics if available (dual quote pricing)
       route_metrics: routeMetrics ? {
@@ -167,9 +176,102 @@ export function buildBookingLineItems(
         decision_reason: dualQuotePricing.stopGraceApplied
           ? `Detour within grace threshold (${dualQuotePricing.graceThresholdMiles}mi / ${dualQuotePricing.graceThresholdMinutes}min) - using direct quote`
           : `Detour exceeds grace threshold (${dualQuotePricing.graceThresholdMiles}mi / ${dualQuotePricing.graceThresholdMinutes}min) - using full quote`
-      } : undefined
+      } : undefined,
+      // 🆕 NEW: Legs snapshot for multi-leg bookings
+      legs: legs && legs.length > 0 ? legs.map(leg => ({
+        leg_number: leg.leg_number,
+        leg_kind: leg.leg_kind,
+        vehicle_category: leg.vehicle_category,
+        vehicle_unit_index: leg.vehicle_unit_index,
+        pickup: leg.pickup,
+        dropoff: leg.dropoff,
+        stops: leg.stops,
+        scheduled_at: leg.scheduled_at,
+        distance_miles: leg.distance_miles,
+        duration_min: leg.duration_min,
+        pricing: {
+          base_fare_pence: Math.round(leg.pricing.baseFare * 100),
+          distance_fee_pence: Math.round(leg.pricing.distanceFee * 100),
+          time_fee_pence: Math.round(leg.pricing.timeFee * 100),
+          multi_stop_fee_pence: Math.round(leg.pricing.multiStopFee * 100),
+          waiting_fees_pence: Math.round(leg.pricing.waitingFees * 100),
+          airport_fees_pence: Math.round(leg.pricing.airportFees * 100),
+          zone_fees_pence: Math.round(leg.pricing.zoneFees * 100),
+          toll_fees_pence: Math.round(leg.pricing.tollFees * 100),
+          service_item_fees_pence: Math.round(leg.pricing.serviceItemFees * 100),
+          subtotal_pence: Math.round(leg.pricing.subtotal * 100),
+          discount_pence: Math.round(leg.pricing.discount * 100),
+          vat_pence: 0,  // Currently 0 per leg, VAT calculated at booking level
+          total_pence: Math.round(leg.pricing.finalPrice * 100),
+          multipliers: leg.pricing.multipliers,
+          details: leg.pricing.details.map(d => ({
+            component: d.component,
+            amount_pence: Math.round(d.amount * 100),
+            description: d.description
+          }))
+        }
+      } as import('../../types/pricing.types').LegSnapshotData)) : undefined
     }
   };
+}
+
+/**
+ * Validate legs data consistency with booking totals
+ * Ensures legs sum matches booking-level amounts (with tolerance for rounding)
+ */
+function validateLegsData(
+  legs: LegBreakdown[],
+  bookingSubtotalPence: number,
+  bookingDiscountPence: number,
+  bookingTotalPence: number
+): void {
+  // Sum leg subtotals
+  const legsSubtotalSum = legs.reduce(
+    (sum, leg) => sum + Math.round(leg.pricing.subtotal * 100),
+    0
+  );
+
+  // Sum leg discounts
+  const legsDiscountSum = legs.reduce(
+    (sum, leg) => sum + Math.round(leg.pricing.discount * 100),
+    0
+  );
+
+  // Sum leg totals
+  const legsTotalSum = legs.reduce(
+    (sum, leg) => sum + Math.round(leg.pricing.finalPrice * 100),
+    0
+  );
+
+  // Allow 2 pence tolerance for rounding
+  const TOLERANCE_PENCE = 2;
+
+  // Validate subtotal
+  const subtotalDiff = Math.abs(legsSubtotalSum - bookingSubtotalPence);
+  if (subtotalDiff > TOLERANCE_PENCE) {
+    throw new Error(
+      `Legs subtotal mismatch: legs sum ${legsSubtotalSum}p, ` +
+      `booking ${bookingSubtotalPence}p, diff ${subtotalDiff}p`
+    );
+  }
+
+  // Validate discount
+  const discountDiff = Math.abs(legsDiscountSum - bookingDiscountPence);
+  if (discountDiff > TOLERANCE_PENCE) {
+    throw new Error(
+      `Legs discount mismatch: legs sum ${legsDiscountSum}p, ` +
+      `booking ${bookingDiscountPence}p, diff ${discountDiff}p`
+    );
+  }
+
+  // Validate total
+  const totalDiff = Math.abs(legsTotalSum - bookingTotalPence);
+  if (totalDiff > TOLERANCE_PENCE) {
+    throw new Error(
+      `Legs total mismatch: legs sum ${legsTotalSum}p, ` +
+      `booking ${bookingTotalPence}p, diff ${totalDiff}p`
+    );
+  }
 }
 
 /**
