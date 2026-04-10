@@ -63,6 +63,7 @@ app.use(express.urlencoded({ extended: true }));
 // Development auth middleware (only in development)
 app.use('/api/pricing/calculate-and-quote', devAuthMiddleware);
 app.use('/api/pricing/convert-quote-to-booking', devAuthMiddleware);
+app.use('/api/pricing/preview-all-categories', devAuthMiddleware);
 
 // API Routes
 app.use('/api/pricing', pricingRoutes);

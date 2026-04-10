@@ -47,11 +47,29 @@ export class FinancialSnapshotService {
       // Step 2: Create leg financial snapshots
       const legFinancialIds: string[] = [];
       if (quote.leg_quotes && quote.leg_quotes.length > 0) {
+        // Fetch vehicle_category_ids from booking_legs for guardrail lookup
+        const { data: bookingLegs } = await supabase
+          .from('booking_legs')
+          .select('id, vehicle_category_id')
+          .eq('booking_id', bookingId);
+
+        // Create map for leg_id -> vehicle_category_id lookup
+        const legVehicleMap = new Map(
+          bookingLegs?.map(l => [l.id, l.vehicle_category_id]) || []
+        );
+
         for (const legQuote of quote.leg_quotes) {
+          const legId = legQuote.booking_leg_id;
+          const vehicleCategoryId = legVehicleMap.get(legId) || null;
+
           const legFinancialId = await this.createLegFinancial(
             bookingId,
             legQuote,
-            settings
+            settings,
+            quote.pricing_version_id || null,
+            vehicleCategoryId,
+            quote.booking_type || null,
+            organizationId
           );
           legFinancialIds.push(legFinancialId);
         }
@@ -205,12 +223,117 @@ export class FinancialSnapshotService {
   }
 
   /**
+   * Calculate driver payout with factor and guardrails
+   * Shared logic between leg-level and booking-level
+   */
+  private static async calculateDriverPayoutWithGuardrails(
+    basePayoutPence: number,
+    pricingVersionId: string | null,
+    vehicleCategoryId: string | null,
+    bookingType: string | null,
+    organizationId: string
+  ): Promise<{
+    targetPayout: number;
+    finalPayout: number;
+    factorUsed: number | null;
+    minGuardrail: number | null;
+    maxGuardrail: number | null;
+  }> {
+    // Fallback: return base if no pricing version
+    if (!pricingVersionId || basePayoutPence <= 0) {
+      return {
+        targetPayout: basePayoutPence,
+        finalPayout: basePayoutPence,
+        factorUsed: null,
+        minGuardrail: null,
+        maxGuardrail: null
+      };
+    }
+
+    try {
+      const { PricingDataService } = await import('./PricingDataService');
+      const config = await PricingDataService.getDriverPricingConfig(pricingVersionId);
+
+      if (!config) {
+        console.warn(`⚠️ Pricing config not found for version ${pricingVersionId}, using fallback`);
+        return {
+          targetPayout: basePayoutPence,
+          finalPayout: basePayoutPence,
+          factorUsed: null,
+          minGuardrail: null,
+          maxGuardrail: null
+        };
+      }
+
+      // Fetch vehicle-specific rates if available
+      let vehicleMinPayout: number | null = null;
+      let vehicleMaxPayout: number | null = null;
+
+      if (vehicleCategoryId && bookingType) {
+        try {
+          const vehicleRates = await PricingDataService.getVehicleRates(
+            vehicleCategoryId,
+            bookingType,
+            organizationId
+          );
+          vehicleMinPayout = vehicleRates.driver_min_payout_pence ?? null;
+          vehicleMaxPayout = vehicleRates.driver_max_payout_pence ?? null;
+        } catch (error) {
+          console.warn(`⚠️ Could not fetch vehicle rates for ${vehicleCategoryId}, using global guardrails`);
+        }
+      }
+
+      // Calculate target with factor
+      const rawTargetPayout = Math.round(basePayoutPence * config.factor);
+      let finalPayout = rawTargetPayout;
+
+      // Apply guardrails (vehicle-specific or global)
+      const minPayout = vehicleMinPayout ?? config.minPayoutPence;
+      const maxPayout = vehicleMaxPayout ?? config.maxPayoutPence;
+      const guardrailSource = vehicleMinPayout !== null ? 'vehicle-specific' : 'global';
+
+      if (minPayout !== null && finalPayout < minPayout) {
+        finalPayout = minPayout;
+        console.log(`⚠️ Driver payout clamped to min (${guardrailSource}): ${rawTargetPayout}p → ${finalPayout}p`);
+      }
+
+      if (maxPayout !== null && finalPayout > maxPayout) {
+        finalPayout = maxPayout;
+        console.log(`⚠️ Driver payout clamped to max (${guardrailSource}): ${rawTargetPayout}p → ${finalPayout}p`);
+      }
+
+      console.log(`💰 Driver payout: ${basePayoutPence}p × ${config.factor} = ${rawTargetPayout}p → ${finalPayout}p (after guardrails)`);
+
+      return {
+        targetPayout: rawTargetPayout,
+        finalPayout: finalPayout,
+        factorUsed: config.factor,
+        minGuardrail: minPayout,
+        maxGuardrail: maxPayout
+      };
+    } catch (error) {
+      console.error('❌ Error calculating driver payout with guardrails:', error);
+      return {
+        targetPayout: basePayoutPence,
+        finalPayout: basePayoutPence,
+        factorUsed: null,
+        minGuardrail: null,
+        maxGuardrail: null
+      };
+    }
+  }
+
+  /**
    * Create leg financial snapshot
    */
   private static async createLegFinancial(
     bookingId: string,
     legQuote: any,
-    settings: any
+    settings: any,
+    pricingVersionId: string | null,
+    vehicleCategoryId: string | null,
+    bookingType: string | null,
+    organizationId: string
   ): Promise<string> {
     // Calculate from quote fields (aligned with schema)
     const subtotalPence = legQuote.subtotal_pence || 0;
@@ -224,13 +347,28 @@ export class FinancialSnapshotService {
     // Calculate commissions (from subtotal ex VAT)
     const platformFeePence = Math.round(subtotalExVatPence * settings.platform_commission_pct);
     const operatorFeePence = Math.round((subtotalExVatPence - platformFeePence) * settings.operator_commission_pct);
-    const driverPayoutPence = subtotalExVatPence - platformFeePence - operatorFeePence;
+
+    // Calculate base payout (before factor and guardrails)
+    const driverBasePayoutPence = subtotalExVatPence - platformFeePence - operatorFeePence;
+
+    // Apply pricing factor and guardrails (NEW - aligns with booking-level)
+    const payoutCalc = await this.calculateDriverPayoutWithGuardrails(
+      driverBasePayoutPence,
+      pricingVersionId,
+      vehicleCategoryId,
+      bookingType,
+      organizationId
+    );
+
+    const driverPayoutPence = payoutCalc.finalPayout;
     const vendorCostPence = driverPayoutPence; // Driver payout is main operational cost
 
     // Build line_items JSONB snapshot
     const lineItems = {
       source: 'quote_snapshot',
       quote_id: legQuote.id,
+      pricing_version_id: pricingVersionId,
+      vehicle_category_id: vehicleCategoryId,
       pricing: {
         subtotal_pence: subtotalPence,
         discount_pence: discountPence,
@@ -241,7 +379,13 @@ export class FinancialSnapshotService {
       commissions: {
         platform_fee_pence: platformFeePence,
         operator_fee_pence: operatorFeePence,
-        driver_payout_pence: driverPayoutPence
+        driver_payout_pence: driverPayoutPence,
+        driver_base_payout_pence: driverBasePayoutPence,
+        driver_target_payout_pence: payoutCalc.targetPayout,
+        driver_pricing_factor: payoutCalc.factorUsed,
+        percentage_min_payout: payoutCalc.minGuardrail,
+        percentage_max_payout: payoutCalc.maxGuardrail,
+        guardrail_applied: payoutCalc.factorUsed !== null
       }
     };
 
@@ -254,7 +398,16 @@ export class FinancialSnapshotService {
         currency: 'GBP',
         driver_payout_pence: driverPayoutPence,
         platform_fee_pence: platformFeePence,
+        operator_fee_pence: operatorFeePence,
         vendor_cost_pence: vendorCostPence,
+        // NEW: Driver payout model columns (aligns with booking-level)
+        driver_base_payout_pence: driverBasePayoutPence,
+        driver_target_payout_pence: payoutCalc.targetPayout,
+        driver_final_payout_pence: payoutCalc.finalPayout,
+        driver_pricing_factor_used: payoutCalc.factorUsed,
+        driver_estimated_payout_pence: driverBasePayoutPence,
+        pricing_version_id: pricingVersionId,
+        vehicle_category_id: vehicleCategoryId,
         line_items: lineItems,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -337,10 +490,118 @@ export class FinancialSnapshotService {
     const platformFeeRateBp = Math.round(settings.platform_commission_pct * 10000);
     const operatorFeeRateBp = Math.round(settings.operator_commission_pct * 10000);
 
-    // Vendor cost = driver payout (main operational cost)
-    const vendorCostPence = driverPayoutPence;
+    // NEW COLUMNS - Phase 5 Implementation
 
-    // Platform profit = platform fee (simplified for now)
+    // driver_estimated_payout_pence: Baseline driver route price from pricing logic
+    // This is the BASELINE for optimization, NOT internal operating cost
+    const driverEstimatedPayoutPence = driverBasePayoutPence + driverExtrasPayoutPence;
+    console.log(`💰 Driver estimated payout (baseline): ${driverBasePayoutPence}p (base) + ${driverExtrasPayoutPence}p (extras) = ${driverEstimatedPayoutPence}p`);
+
+    // driver_estimated_cost_pence: Driver's internal operational cost estimate (analytical only)
+    // Uses structured route metrics from quote (total_distance_miles, total_duration_minutes)
+    // This is kept SEPARATE for analytics, NOT used for payout calculation
+    let driverEstimatedCostPence: number | null = null;
+
+    const totalDistanceMiles = quote.total_distance_miles || 0;
+    const totalDurationMin = quote.total_duration_minutes || 0;
+
+    if (totalDistanceMiles > 0 || totalDurationMin > 0) {
+      const COST_PER_MILE_PENCE = 30;  // £0.30/mile (fuel + vehicle wear)
+      const COST_PER_MINUTE_PENCE = 5; // £0.05/min (time cost)
+
+      driverEstimatedCostPence = Math.round(
+        (totalDistanceMiles * COST_PER_MILE_PENCE) +
+        (totalDurationMin * COST_PER_MINUTE_PENCE)
+      );
+
+      console.log(`� Driver estimated cost (analytics): ${totalDistanceMiles}mi × ${COST_PER_MILE_PENCE}p + ${totalDurationMin}min × ${COST_PER_MINUTE_PENCE}p = ${driverEstimatedCostPence}p`);
+    }
+
+    // driver_target_payout_pence: Calculated target payout using versioned pricing factor
+    // SOURCE OF TRUTH for driver target payout
+    let driverTargetPayoutPence: number;
+    let driverPricingFactorUsed: number | null = null;
+
+    if (quote.pricing_version_id && driverEstimatedPayoutPence > 0) {
+      const { PricingDataService } = await import('./PricingDataService');
+      const config = await PricingDataService.getDriverPricingConfig(quote.pricing_version_id);
+
+      if (config !== null) {
+        let vehicleMinPayout: number | null = null;
+        let vehicleMaxPayout: number | null = null;
+
+        // Fetch vehicle_category_id from booking_legs (source of truth)
+        try {
+          const { data: bookingLeg } = await supabase
+            .from('booking_legs')
+            .select('vehicle_category_id')
+            .eq('booking_id', bookingId)
+            .limit(1)
+            .single();
+
+          const vehicleCategoryId = bookingLeg?.vehicle_category_id;
+
+          if (vehicleCategoryId && quote.booking_type) {
+            const vehicleRates = await PricingDataService.getVehicleRates(
+              vehicleCategoryId,
+              quote.booking_type,
+              quote.organization_id
+            );
+            vehicleMinPayout = vehicleRates.driver_min_payout_pence ?? null;
+            vehicleMaxPayout = vehicleRates.driver_max_payout_pence ?? null;
+          }
+        } catch (error) {
+          console.warn('⚠️ Could not fetch vehicle rates for guardrails, using global only');
+        }
+
+        const minPayoutPence = vehicleMinPayout ?? config.minPayoutPence;
+        const maxPayoutPence = vehicleMaxPayout ?? config.maxPayoutPence;
+
+        let rawTargetPayout = Math.round(driverEstimatedPayoutPence * config.factor);
+        let targetPayout = rawTargetPayout;
+
+        if (minPayoutPence !== null && targetPayout < minPayoutPence) {
+          targetPayout = minPayoutPence;
+          const source = vehicleMinPayout !== null ? 'vehicle-specific' : 'global';
+          console.log(`⚠️ Driver payout clamped to min (${source}): ${rawTargetPayout}p → ${targetPayout}p`);
+        }
+
+        if (maxPayoutPence !== null && targetPayout > maxPayoutPence) {
+          targetPayout = maxPayoutPence;
+          const source = vehicleMaxPayout !== null ? 'vehicle-specific' : 'global';
+          console.log(`⚠️ Driver payout clamped to max (${source}): ${rawTargetPayout}p → ${targetPayout}p`);
+        }
+
+        driverTargetPayoutPence = targetPayout;
+        driverPricingFactorUsed = config.factor;
+
+        console.log(`💰 Driver target payout: ${driverEstimatedPayoutPence}p × ${config.factor} = ${rawTargetPayout}p → ${targetPayout}p (after guardrails)`);
+      } else {
+        driverTargetPayoutPence = driverPayoutPence;
+        console.warn('⚠️ Pricing version config not found, using fallback calculation');
+      }
+    } else {
+      driverTargetPayoutPence = driverPayoutPence;
+      if (!quote.pricing_version_id) {
+        console.warn('⚠️ No pricing_version_id, using fallback calculation');
+      }
+      if (!driverEstimatedPayoutPence || driverEstimatedPayoutPence <= 0) {
+        console.warn('⚠️ No driver_estimated_payout_pence, using fallback calculation');
+      }
+    }
+
+    // gross_margin_pence: Business gross margin before costs
+    // Official formula: subtotal_ex_vat_pence - vendor_cost_pence
+    const vendorCostPence = driverTargetPayoutPence; // Current model: vendor = driver
+    const grossMarginPence = subtotalExVatPence - vendorCostPence;
+
+    // net_margin_pence: Business net margin after processor fee
+    // NULL until payment processed (processor_fee_pence not known yet)
+    const netMarginPence: number | null = null;
+
+    // LEGACY COLUMNS - Backward Compatibility
+
+    // Platform profit = platform fee (keep existing logic for compatibility)
     const platformProfitPence = platformFeePence;
 
     // Temporary values (until payment integration complete)
@@ -395,12 +656,23 @@ export class FinancialSnapshotService {
         // Fee amounts (pence)
         platform_fee_pence: platformFeePence,
         operator_fee_pence: operatorFeePence,
-        driver_payout_pence: driverPayoutPence,
         driver_base_payout_pence: driverBasePayoutPence,
         driver_extras_payout_pence: driverExtrasPayoutPence,
-        vendor_cost_pence: vendorCostPence,
-        platform_profit_pence: platformProfitPence,
         processor_fee_pence: processorFeePence,
+
+        // NEW COLUMNS - Phase 5
+        driver_target_payout_pence: driverTargetPayoutPence,
+        driver_final_payout_pence: null,
+        driver_estimated_payout_pence: driverEstimatedPayoutPence,
+        driver_estimated_cost_pence: driverEstimatedCostPence,
+        driver_pricing_factor_used: driverPricingFactorUsed,
+        gross_margin_pence: grossMarginPence,
+        net_margin_pence: netMarginPence,
+
+        // LEGACY COLUMNS - Backward Compatibility (mirror new values)
+        driver_payout_pence: driverTargetPayoutPence, // Mirror driver_target_payout_pence
+        vendor_cost_pence: vendorCostPence, // Mirrors driver_target_payout_pence in current model
+        platform_profit_pence: platformProfitPence,
 
         // Net amounts (pence)
         net_collected_pence: netCollectedPence,

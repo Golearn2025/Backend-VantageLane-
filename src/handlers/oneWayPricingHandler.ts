@@ -138,6 +138,12 @@ export async function handleOneWayPricing(
         finalPrice: legBreakdown.pricing.finalPrice,
         details: legBreakdown.pricing.details,
       };
+
+      // Populate routeMetrics from calculated metrics (for financial snapshot)
+      routeMetrics = {
+        fullDistance: metrics.totalDistance,
+        fullDuration: metrics.totalDuration,
+      };
     }
 
     // 7. Get pricing version ID

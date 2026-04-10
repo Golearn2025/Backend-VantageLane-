@@ -109,6 +109,7 @@ function parseOneWay(request: PricingRequestData): ParseResult {
     passengers: request.passengers,
     luggage: request.luggage,
     flightNumber: request.flightNumber,
+    vehicleModel: request.vehicleModel,
     customRequirements: request.customRequirements,
     organizationId: request.organizationId,
   };
@@ -159,6 +160,7 @@ function parseReturn(request: PricingRequestData): ParseResult {
     passengers: request.passengers,
     luggage: request.luggage,
     flightNumber: request.flightNumber,
+    vehicleModel: request.vehicleModel,
     customRequirements: request.customRequirements,
     organizationId: request.organizationId,
   };
@@ -196,6 +198,7 @@ function parseHourly(request: PricingRequestData): ParseResult {
     passengers: request.passengers,
     luggage: request.luggage,
     flightNumber: request.flightNumber,
+    vehicleModel: request.vehicleModel,
     customRequirements: request.customRequirements,
     organizationId: request.organizationId,
   };
@@ -233,6 +236,7 @@ function parseDaily(request: PricingRequestData): ParseResult {
     passengers: request.passengers,
     luggage: request.luggage,
     flightNumber: request.flightNumber,
+    vehicleModel: request.vehicleModel,
     customRequirements: request.customRequirements,
     organizationId: request.organizationId,
   };
@@ -286,6 +290,7 @@ function parseFleet(request: PricingRequestData): ParseResult {
     passengers: request.passengers,
     luggage: request.luggage,
     flightNumber: request.flightNumber,
+    vehicleModel: request.vehicleModel,
     customRequirements: request.customRequirements,
     organizationId: request.organizationId,
   };
@@ -294,7 +299,7 @@ function parseFleet(request: PricingRequestData): ParseResult {
 }
 
 /**
- * Normalize TripPointInput to TripPoint
+ * Normalize a TripPointInput to TripPoint
  * Converts coordinates from tuple/object to Coordinates
  */
 function normalizeTripPoint(

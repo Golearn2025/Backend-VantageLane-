@@ -558,6 +558,47 @@ export class PricingDataService {
   }
 
   /**
+   * Get driver pricing configuration from specific pricing version
+   * Returns factor and guardrails (min/max payout)
+   * Used by financial snapshot creation to calculate driver target payout
+   * Returns null if pricing version not found (triggers fallback to old calculation)
+   */
+  static async getDriverPricingConfig(pricingVersionId: string): Promise<{
+    factor: number;
+    minPayoutPence: number | null;
+    maxPayoutPence: number | null;
+  } | null> {
+    const cacheKey = `driver_pricing_config:${pricingVersionId}`;
+    const cached = cache.get<{ factor: number; minPayoutPence: number | null; maxPayoutPence: number | null }>(cacheKey);
+    if (cached !== null) return cached;
+
+    const { data, error } = await supabase
+      .from('pricing_versions')
+      .select('driver_pricing_factor, driver_min_payout_pence, driver_max_payout_pence')
+      .eq('id', pricingVersionId)
+      .single();
+
+    if (error) {
+      console.error(`Error fetching driver pricing config for version ${pricingVersionId}:`, error);
+      return null; // Trigger fallback to old calculation
+    }
+
+    if (!data || data.driver_pricing_factor === null) {
+      console.warn(`No driver pricing config found for version ${pricingVersionId}`);
+      return null; // Trigger fallback to old calculation
+    }
+
+    const config = {
+      factor: data.driver_pricing_factor,
+      minPayoutPence: data.driver_min_payout_pence,
+      maxPayoutPence: data.driver_max_payout_pence
+    };
+
+    cache.set(cacheKey, config);
+    return config;
+  }
+
+  /**
    * Get multi-stop policy
    * Returns fee per additional stop
    */

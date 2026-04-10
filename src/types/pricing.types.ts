@@ -82,6 +82,7 @@ export interface TripPoint {
 export interface PricingRequestData {
   bookingType: BookingType;
   vehicleType?: VehicleType;
+  vehicleModel?: string;
   dateTime: string;
 
   // ONE_WAY & RETURN locations
@@ -150,6 +151,7 @@ export interface NormalizedOneWayRequest {
   passengers?: number;
   luggage?: number;
   flightNumber?: string;
+  vehicleModel?: string;
   customRequirements?: string;
   organizationId?: string;
 }
@@ -176,6 +178,7 @@ export interface NormalizedReturnRequest {
   passengers?: number;
   luggage?: number;
   flightNumber?: string;
+  vehicleModel?: string;
   customRequirements?: string;
   organizationId?: string;
 }
@@ -196,6 +199,7 @@ export interface NormalizedHourlyRequest {
   passengers?: number;
   luggage?: number;
   flightNumber?: string;
+  vehicleModel?: string;
   customRequirements?: string;
   organizationId?: string;
 }
@@ -216,6 +220,7 @@ export interface NormalizedDailyRequest {
   passengers?: number;
   luggage?: number;
   flightNumber?: string;
+  vehicleModel?: string;
   customRequirements?: string;
   organizationId?: string;
 }
@@ -248,6 +253,7 @@ export interface NormalizedFleetRequest {
   passengers?: number;
   luggage?: number;
   flightNumber?: string;
+  vehicleModel?: string;
   customRequirements?: string;
   organizationId?: string;
 }

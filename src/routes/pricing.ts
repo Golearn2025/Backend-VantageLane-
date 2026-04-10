@@ -9,6 +9,7 @@ import { VehicleType, BookingType } from '../types/pricing.types';
 import { calculateAndQuote } from '../api/pricing/calculate-and-quote';
 import { convertQuoteToBooking } from '../api/pricing/convert-quote-to-booking';
 import createPaymentIntent from '../api/pricing/create-payment-intent';
+import { previewAllCategories } from '../api/pricing/preview-all-categories';
 
 const router = Router();
 
@@ -135,6 +136,13 @@ router.post('/convert-quote-to-booking', convertQuoteToBookingValidation, conver
  * @access Public
  */
 router.post('/create-payment-intent', createPaymentIntentValidation, createPaymentIntent);
+
+/**
+ * @route POST /api/pricing/preview-all-categories
+ * @desc Preview prices for all vehicle categories at once (no quote created)
+ * @access Public
+ */
+router.post('/preview-all-categories', previewAllCategories);
 
 /**
  * @route GET /api/pricing/health

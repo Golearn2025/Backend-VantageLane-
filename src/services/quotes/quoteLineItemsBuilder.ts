@@ -339,6 +339,7 @@ export function buildTripMetadata(requestData: NormalizedPricingRequest): any {
     ...(requestData.passengers && { passengers: requestData.passengers }),
     ...(requestData.luggage && { luggage: requestData.luggage }),
     ...(requestData.flightNumber && { flightNumber: requestData.flightNumber }),
+    ...(requestData.vehicleModel && { vehicleModel: requestData.vehicleModel }),
     ...(requestData.customRequirements && { customRequirements: requestData.customRequirements })
   };
 

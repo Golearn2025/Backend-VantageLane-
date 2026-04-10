@@ -173,6 +173,9 @@ export class WebhookService {
         case 'charge.succeeded':
           return await this.handleChargeSucceeded(event.data.object as Stripe.Charge);
 
+        case 'charge.updated':
+          return await this.handleChargeUpdated(event.data.object as Stripe.Charge);
+
         // Ignored events
         case 'payment_intent.created':
         case 'payment_intent.requires_action':
@@ -225,7 +228,14 @@ export class WebhookService {
         .neq('status', 'succeeded'); // Only update if not already succeeded
 
       if (paymentError) {
-        return { success: false, error: 'Failed to update payment record' };
+        console.error('❌ WebhookService: Payment UPDATE error:', {
+          code: paymentError.code,
+          message: paymentError.message,
+          details: paymentError.details,
+          hint: paymentError.hint,
+          payment_id: paymentRecord.id
+        });
+        return { success: false, error: `Failed to update payment record: ${paymentError.message}` };
       }
 
       // 4. Update booking status to CONFIRMED (defensive - only if PENDING_PAYMENT)
@@ -422,20 +432,39 @@ export class WebhookService {
         return { success: true, data: { ignored: true, reason: 'Charge not associated with payment record' } };
       }
 
-      // Update fee information only if we can get actual fee
+      // Update fee information - fetch charge with balance_transaction from Stripe
       let updateData: any = {
         updated_at: new Date().toISOString()
       };
 
-      if (typeof charge.balance_transaction !== 'string' && charge.balance_transaction?.fee) {
-        // We have actual fee data
-        updateData.stripe_fee_pence = charge.balance_transaction.fee;
-        updateData.net_amount_pence = charge.amount - charge.balance_transaction.fee;
-        console.log(`💳 WebhookService: Updated actual fee ${charge.balance_transaction.fee} for payment ${paymentRecord.id}`);
+      let actualFee: number | null = null;
+
+      // Stripe CLI webhooks don't include balance_transaction, so fetch the full charge
+      try {
+        console.log(`💳 WebhookService: Fetching full charge from Stripe: ${charge.id}`);
+        const stripe = (await import('stripe')).default;
+        const stripeClient = new stripe(process.env.STRIPE_SECRET_KEY || '', { apiVersion: '2026-02-25.clover' });
+        const fullCharge = await stripeClient.charges.retrieve(charge.id, {
+          expand: ['balance_transaction']
+        });
+
+        if (fullCharge.balance_transaction && typeof fullCharge.balance_transaction !== 'string') {
+          actualFee = fullCharge.balance_transaction.fee;
+          console.log(`💳 WebhookService: Fetched charge with balance_transaction, fee: ${actualFee}p`);
+        } else {
+          console.log(`💳 WebhookService: Balance transaction not available in fetched charge`);
+        }
+      } catch (fetchError) {
+        console.error(`⚠️ WebhookService: Failed to fetch charge from Stripe:`, fetchError);
+        // Continue without fee - don't fail the webhook
+      }
+
+      if (actualFee !== null) {
+        updateData.stripe_fee_pence = actualFee;
+        updateData.net_amount_pence = charge.amount - actualFee;
+        console.log(`💳 WebhookService: Updated actual fee ${actualFee}p for payment ${paymentRecord.id}`);
       } else {
-        // Balance transaction is just an ID, we can't get fee without API call
-        // TODO: Fetch balance transaction object in future
-        console.log(`💳 WebhookService: Balance transaction not expanded, keeping existing fee for payment ${paymentRecord.id}`);
+        console.log(`💳 WebhookService: No fee data available for payment ${paymentRecord.id}`);
       }
 
       await supabase
@@ -444,6 +473,22 @@ export class WebhookService {
         .eq('id', paymentRecord.id);
 
       console.log(`✅ WebhookService: Updated fee information for payment ${paymentRecord.id}`);
+
+      // PHASE 6: Update internal_booking_financials with payment linkage
+      if (updateData.stripe_fee_pence !== undefined) {
+        try {
+          await this.updateFinancialSnapshotWithPayment(
+            paymentRecord.booking_id,
+            paymentRecord.id,
+            updateData.stripe_fee_pence,
+            updateData.net_amount_pence
+          );
+          console.log(`✅ WebhookService: Updated financial snapshot for booking ${paymentRecord.booking_id}`);
+        } catch (financialError) {
+          console.error('⚠️ WebhookService: Failed to update financial snapshot:', financialError);
+          // Don't fail the webhook if financial update fails
+        }
+      }
 
       return {
         success: true,
@@ -481,6 +526,169 @@ export class WebhookService {
     }
 
     return data;
+  }
+
+  /**
+   * Handle charge.updated (for late-arriving balance_transaction)
+   * This webhook fires when balance_transaction becomes available after charge.succeeded
+   */
+  private static async handleChargeUpdated(charge: Stripe.Charge): Promise<WebhookResult> {
+    try {
+      console.log(`🔄 WebhookService: Processing charge.updated: ${charge.id}`);
+
+      // Find payment record by payment intent ID
+      const { data: paymentRecord, error } = await supabase
+        .from('booking_payments')
+        .select('id, booking_id, organization_id, stripe_payment_intent_id, stripe_fee_pence, amount_pence')
+        .eq('stripe_payment_intent_id', charge.payment_intent)
+        .single();
+
+      if (error || !paymentRecord) {
+        console.log(`ℹ️ WebhookService: Payment intent ${charge.payment_intent} not found, ignoring`);
+        return { success: true, data: { ignored: true, reason: 'Payment not found' } };
+      }
+
+      // IDEMPOTENT: Only update if stripe_fee_pence is null or 0
+      if (paymentRecord.stripe_fee_pence && paymentRecord.stripe_fee_pence > 0) {
+        console.log(`ℹ️ WebhookService: Fees already populated for payment ${paymentRecord.id}, skipping`);
+        return { success: true, data: { ignored: true, reason: 'Fees already set' } };
+      }
+
+      // ALWAYS fetch fresh charge from Stripe with expanded balance_transaction
+      // Webhook payload may not include balance_transaction even when it exists
+      let actualFee: number | null = null;
+      try {
+        console.log(`💳 WebhookService: Fetching full charge from Stripe: ${charge.id}`);
+        const stripe = (await import('stripe')).default;
+        const stripeClient = new stripe(process.env.STRIPE_SECRET_KEY || '', { apiVersion: '2026-02-25.clover' });
+        const fullCharge = await stripeClient.charges.retrieve(charge.id, {
+          expand: ['balance_transaction']
+        });
+
+        if (fullCharge.balance_transaction && typeof fullCharge.balance_transaction !== 'string') {
+          actualFee = fullCharge.balance_transaction.fee;
+          console.log(`💳 WebhookService: Fetched charge with balance_transaction, fee: ${actualFee}p`);
+        } else {
+          console.log(`💳 WebhookService: Balance transaction still not available, skipping`);
+          return { success: true, data: { ignored: true, reason: 'Balance transaction not ready' } };
+        }
+      } catch (fetchError) {
+        console.error(`⚠️ WebhookService: Failed to fetch charge from Stripe:`, fetchError);
+        return { success: false, error: 'Failed to fetch charge' };
+      }
+
+      if (actualFee === null) {
+        console.log(`⚠️ WebhookService: No fee available in balance_transaction`);
+        return { success: true, data: { ignored: true, reason: 'No fee available' } };
+      }
+
+      const netAmount = charge.amount - actualFee;
+
+      // Update booking_payments
+      const { error: paymentError } = await supabase
+        .from('booking_payments')
+        .update({
+          stripe_fee_pence: actualFee,
+          net_amount_pence: netAmount,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', paymentRecord.id);
+
+      if (paymentError) {
+        console.error(`❌ WebhookService: Failed to update payment:`, paymentError);
+        return { success: false, error: 'Failed to update payment' };
+      }
+
+      console.log(`✅ WebhookService: Updated payment ${paymentRecord.id} with fee ${actualFee}p`);
+
+      // Update internal_booking_financials (Phase 6)
+      try {
+        await this.updateFinancialSnapshotWithPayment(
+          paymentRecord.booking_id,
+          paymentRecord.id,
+          actualFee,
+          netAmount
+        );
+        console.log(`✅ WebhookService: Updated financial snapshot for booking ${paymentRecord.booking_id}`);
+      } catch (financialError) {
+        console.error('⚠️ WebhookService: Failed to update financial snapshot:', financialError);
+        // Don't fail the webhook if financial update fails
+      }
+
+      return {
+        success: true,
+        data: {
+          payment_id: paymentRecord.id,
+          booking_id: paymentRecord.booking_id,
+          fee_updated: true,
+          fee: actualFee
+        }
+      };
+
+    } catch (error) {
+      console.error('❌ WebhookService: Error in handleChargeUpdated:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
+   * PHASE 6: Update internal_booking_financials with payment linkage
+   * Called after charge.succeeded to link payment data to financial snapshot
+   */
+  private static async updateFinancialSnapshotWithPayment(
+    bookingId: string,
+    bookingPaymentId: string,
+    processorFeePence: number,
+    netCollectedPence: number
+  ): Promise<void> {
+    try {
+      console.log(`💰 Updating financial snapshot for booking ${bookingId} with payment data`);
+
+      // 1. Find the LATEST financial snapshot for this booking
+      // Use version DESC to get the most recent snapshot (handles multiple versions)
+      const { data: snapshot, error: fetchError } = await supabase
+        .from('internal_booking_financials')
+        .select('id, gross_margin_pence')
+        .eq('booking_id', bookingId)
+        .order('version', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (fetchError || !snapshot) {
+        console.error('❌ Financial snapshot not found for booking:', bookingId);
+        throw new Error('Financial snapshot not found');
+      }
+
+      // 2. Calculate net_margin_pence
+      // Formula: net_margin_pence = gross_margin_pence - processor_fee_pence
+      const netMarginPence = snapshot.gross_margin_pence - processorFeePence;
+
+      // 3. Update financial snapshot with payment linkage
+      const { error: updateError } = await supabase
+        .from('internal_booking_financials')
+        .update({
+          booking_payment_id: bookingPaymentId,
+          processor_fee_pence: processorFeePence,
+          net_collected_pence: netCollectedPence,
+          net_margin_pence: netMarginPence,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', snapshot.id);
+
+      if (updateError) {
+        console.error('❌ Failed to update financial snapshot:', updateError);
+        throw updateError;
+      }
+
+      console.log(`✅ Financial snapshot updated: processor_fee=${processorFeePence}p, net_collected=${netCollectedPence}p, net_margin=${netMarginPence}p`);
+
+    } catch (error) {
+      console.error('❌ Error updating financial snapshot with payment:', error);
+      throw error;
+    }
   }
 
 }

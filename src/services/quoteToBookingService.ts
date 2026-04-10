@@ -94,6 +94,38 @@ export class QuoteToBookingService {
       console.log(`  Quote ID: ${quoteId} → Booking ID: ${result.booking_id}`);
       console.log('🔍 Full RPC result:', JSON.stringify(result, null, 2));
 
+      // STEP 3: Patch vehicle_model_id on booking_legs from quote metadata
+      try {
+        const { data: quoteData } = await supabase
+          .from('client_booking_quotes')
+          .select('line_items')
+          .eq('id', quoteId)
+          .single();
+
+        const vehicleModel = quoteData?.line_items?.meta?.trip?.vehicleModel;
+        if (vehicleModel && result.booking_id) {
+          await supabase
+            .from('booking_legs')
+            .update({ vehicle_model_id: vehicleModel })
+            .eq('booking_id', result.booking_id);
+          console.log('✅ vehicle_model_id patched on booking_legs:', vehicleModel);
+        }
+      } catch (modelPatchError: any) {
+        console.error('⚠️  vehicle_model_id patch failed (non-blocking):', modelPatchError);
+      }
+
+      // STEP 4: Create financial snapshot for the booking
+      try {
+        console.log('💰 Creating financial snapshot for booking:', result.booking_id);
+        const { FinancialSnapshotService } = await import('./FinancialSnapshotService');
+        await FinancialSnapshotService.createFinancialSnapshot(result.booking_id, quoteId, organizationId);
+        console.log('✅ Financial snapshot created successfully');
+      } catch (snapshotError: any) {
+        console.error('⚠️  Failed to create financial snapshot:', snapshotError);
+        // Don't fail the booking if snapshot creation fails - log and continue
+        console.error('   Booking created successfully but snapshot creation failed');
+      }
+
       // Check if RPC already returns reference and amount
       if (result.booking_reference && result.total_amount_pence) {
         console.log('✅ RPC returned complete booking data');

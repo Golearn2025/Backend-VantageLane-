@@ -164,6 +164,7 @@ export class QuoteLineItemsBuilder {
       dateTime: requestData.dateTime,
       bookingType: requestData.bookingType,
       vehicleType: req.vehicleType ?? null,
+      vehicleModel: req.vehicleModel ?? null,
       distance: req.distance ?? null,
       duration: req.duration ?? null,
       coordinates: req.coordinates ?? null,

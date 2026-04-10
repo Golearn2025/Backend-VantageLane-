@@ -103,6 +103,13 @@ export class QuotePersistenceService {
           // Line items with trip metadata
           line_items: lineItems,
 
+          // 🆕 NEW: Total route metrics (primary source for financial calculations)
+          total_distance_miles: pricingResult.routeMetrics?.fullDistance ||
+            (pricingResult.legs?.[0]?.distance_miles) || null,
+          total_duration_minutes: pricingResult.routeMetrics?.fullDuration ?
+            Math.round(pricingResult.routeMetrics.fullDuration) :
+            (pricingResult.legs?.[0]?.duration_min) || null,
+
           // 🆕 NEW: Route metrics columns (dual quote stop pricing)
           direct_distance_miles: pricingResult.routeMetrics?.directDistance || null,
           direct_duration_minutes: pricingResult.routeMetrics?.directDuration ? Math.round(pricingResult.routeMetrics.directDuration) : null,
