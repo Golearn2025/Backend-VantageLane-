@@ -27,11 +27,21 @@ export async function previewAllCategories(req: Request, res: Response) {
       });
     }
 
+    // Fleet preview: calculate per-vehicle prices using the underlying service type.
+    // The full fleet quote (with fleetConfig) is handled by calculate-and-quote.
+    let body = req.body;
+    if (body.bookingType === 'fleet') {
+      const base =
+        body.baseServiceType ||
+        (body.hours > 0 ? 'hourly' : body.days > 0 ? 'daily' : 'oneway');
+      body = { ...body, bookingType: base };
+    }
+
     // Calculate prices for all vehicle types in parallel
     const results = await Promise.allSettled(
       ALL_VEHICLE_TYPES.map(async vehicleType => {
         const requestData = {
-          ...req.body,
+          ...body,
           vehicleType,
           organizationId,
         };
