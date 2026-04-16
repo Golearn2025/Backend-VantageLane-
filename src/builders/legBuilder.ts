@@ -101,7 +101,7 @@ export function buildFleetLegs(
         vehicleType: vehicleType as VehicleType,
         vehicleUnitIndex: unitIndex,
         pickup: request.pickup,
-        dropoff: request.dropoff,
+        dropoff: request.dropoff!,
         stops: request.additionalStops,
         scheduledAt: request.dateTime,
         route, // All fleet vehicles share same route

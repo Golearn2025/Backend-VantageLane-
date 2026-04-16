@@ -17,6 +17,7 @@ import {
   BookingType,
   RouteMetrics as RouteMetricsType,
   DualQuotePricingLogic,
+  PricingRequestData,
 } from '../types/pricing.types';
 import { normalizeRoute, calculateRouteMetrics, RouteMetrics, NormalizedRoute } from '../normalizers/routeNormalizer';
 import { buildOneWayLeg, validateOperationalLeg, OperationalLeg } from '../builders/legBuilder';
@@ -226,7 +227,7 @@ async function calculateLegPricing(
     duration: metrics.totalDuration,
     extras: request.extras.filter(e => e !== 'multi_stop'), // Prevent duplication
     organizationId: request.organizationId,
-  };
+  } as unknown as PricingRequestData;
 
   // Calculate base fare
   await FeeCalculators.calculateBaseFare(breakdown, legacyRequest);

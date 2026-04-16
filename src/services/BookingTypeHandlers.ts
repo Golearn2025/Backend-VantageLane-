@@ -13,7 +13,8 @@ import {
   VehicleType,
   BookingType,
   LegBreakdown,
-  FleetCategorySummary
+  FleetCategorySummary,
+  TripPoint
 } from '../types/pricing.types';
 import { FeeCalculators } from './FeeCalculators';
 import { PricingDataService } from './PricingDataService';
@@ -152,8 +153,8 @@ export class BookingTypeHandlers {
     const outboundLeg: LegBreakdown = {
       leg_number: 1,
       leg_kind: 'main',
-      pickup: request.pickup,
-      dropoff: request.dropoff,
+      pickup: request.pickup as unknown as TripPoint,
+      dropoff: request.dropoff as unknown as TripPoint,
       scheduled_at: request.dateTime,
       distance_miles: request.distance ? request.distance * 0.621371 : undefined,
       duration_min: request.duration,
@@ -173,17 +174,17 @@ export class BookingTypeHandlers {
         finalPrice: pricePerLeg,
         details: []
       },
-      platform_fee: pricePerLeg * platformRate,
-      operator_net: pricePerLeg * (1 - platformRate),
-      driver_payout: pricePerLeg * (1 - platformRate) * (1 - operatorRate)
+      platformFee: pricePerLeg * platformRate,
+      operatorNet: pricePerLeg * (1 - platformRate),
+      driverPayout: pricePerLeg * (1 - platformRate) * (1 - operatorRate)
     };
 
     // Return leg
     const returnLeg: LegBreakdown = {
       leg_number: 2,
       leg_kind: 'return',
-      pickup: request.dropoff,
-      dropoff: request.pickup,
+      pickup: request.dropoff as unknown as TripPoint,
+      dropoff: request.pickup as unknown as TripPoint,
       scheduled_at: request.dateTime, // Would be adjusted for actual return time
       distance_miles: request.distance ? request.distance * 0.621371 : undefined,
       duration_min: request.duration,
@@ -203,9 +204,9 @@ export class BookingTypeHandlers {
         finalPrice: pricePerLeg,
         details: []
       },
-      platform_fee: pricePerLeg * platformRate,
-      operator_net: pricePerLeg * (1 - platformRate),
-      driver_payout: pricePerLeg * (1 - platformRate) * (1 - operatorRate)
+      platformFee: pricePerLeg * platformRate,
+      operatorNet: pricePerLeg * (1 - platformRate),
+      driverPayout: pricePerLeg * (1 - platformRate) * (1 - operatorRate)
     };
 
     return { legs: [outboundLeg, returnLeg] };
@@ -273,8 +274,8 @@ export class BookingTypeHandlers {
           leg_kind: 'fleet_item',
           vehicle_category: vehicleType,
           vehicle_unit_index: i,
-          pickup: request.pickup,
-          dropoff: request.dropoff,
+          pickup: request.pickup as unknown as TripPoint,
+          dropoff: request.dropoff as unknown as TripPoint,
           scheduled_at: request.dateTime,
           distance_miles: request.distance ? request.distance * 0.621371 : undefined,
           duration_min: request.duration,
@@ -298,9 +299,9 @@ export class BookingTypeHandlers {
             finalPrice: vehiclePrice,
             details: []
           },
-          platform_fee: vehiclePrice * platformRate,
-          operator_net: vehiclePrice * (1 - platformRate),
-          driver_payout: vehiclePrice * (1 - platformRate) * (1 - operatorRate)
+          platformFee: vehiclePrice * platformRate,
+          operatorNet: vehiclePrice * (1 - platformRate),
+          driverPayout: vehiclePrice * (1 - platformRate) * (1 - operatorRate)
         };
 
         legs.push(leg);

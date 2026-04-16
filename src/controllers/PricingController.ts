@@ -8,6 +8,7 @@ import { PricingEngine } from '../services/PricingEngine';
 import { QuoteService } from '../services/QuoteService';
 import { OrganizationSettingsService } from '../services/OrganizationSettingsService';
 import { PricingRequestData } from '../types/pricing.types';
+import { parsePricingRequest } from '../parsers/pricingRequestParser';
 
 export class PricingController {
 
@@ -33,9 +34,16 @@ export class PricingController {
                             req.headers['x-organization-id'] as string || 
                             process.env.DEFAULT_ORGANIZATION_ID || 
                             '9a5caade-4791-4860-93b5-12b1c4fa9830';
-      
+
+      const parseResult = parsePricingRequest(requestData);
+      if (!parseResult.success || !parseResult.data) {
+        res.status(400).json({ success: false, error: 'Invalid request', details: parseResult.errors, timestamp: new Date().toISOString() });
+        return;
+      }
+      const normalizedRequest = parseResult.data;
+
       // Calculate pricing
-      const result = await PricingEngine.calculate(requestData);
+      const result = await PricingEngine.calculate(normalizedRequest);
       
       if (!result.success) {
         res.json(result);
@@ -45,7 +53,7 @@ export class PricingController {
       // Persist quote to database
       const quoteResult = await QuoteService.createQuote(
         result,
-        requestData,
+        normalizedRequest,
         organizationId || 'default-org-id'
       );
 
@@ -91,11 +99,18 @@ export class PricingController {
                             process.env.DEFAULT_ORGANIZATION_ID || 
                             '9a5caade-4791-4860-93b5-12b1c4fa9830';
 
+      const parseResult2 = parsePricingRequest(requestData);
+      if (!parseResult2.success || !parseResult2.data) {
+        res.status(400).json({ success: false, error: 'Invalid request', details: parseResult2.errors, timestamp: new Date().toISOString() });
+        return;
+      }
+      const normalizedRequest2 = parseResult2.data;
+
       // Get organization settings (commission rates, VAT)
       const settings = await OrganizationSettingsService.getOrganizationSettings(organizationId);
 
       // Calculate base price
-      const baseResult = await PricingEngine.calculate(requestData);
+      const baseResult = await PricingEngine.calculate(normalizedRequest2);
       
       if (!baseResult.success) {
         res.json(baseResult);
@@ -117,7 +132,7 @@ export class PricingController {
       // Persist quote to database
       const quoteResult = await QuoteService.createQuote(
         baseResult,
-        requestData,
+        normalizedRequest2,
         organizationId || 'default-org-id'
       );
 

@@ -5,7 +5,7 @@
  * Links to existing booking from Phase 2B conversion
  */
 
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
 import { PaymentService } from '../../services/PaymentService';
 
@@ -53,7 +53,7 @@ router.post('/create-payment-intent', [
     .optional()
     .isInt({ min: 1 })
     .withMessage('Amount must be positive integer')
-], async (req, res) => {
+], async (req: Request, res: Response) => {
   try {
     // Validate input
     const errors = validationResult(req);

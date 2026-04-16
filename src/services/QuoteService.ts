@@ -408,6 +408,20 @@ export class QuoteService {
   }
 
   /**
+   * Update quote status
+   */
+  static async updateQuoteStatus(quoteId: string, status: string): Promise<void> {
+    const { error } = await supabase
+      .from('client_booking_quotes')
+      .update({ status })
+      .eq('id', quoteId);
+
+    if (error) {
+      throw new Error(`Failed to update quote status: ${error.message}`);
+    }
+  }
+
+  /**
    * Get quote by ID
    */
   static async getQuote(quoteId: string): Promise<any> {
