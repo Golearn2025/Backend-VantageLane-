@@ -255,6 +255,19 @@ export class WebhookService {
 
       console.log(`✅ WebhookService: Payment succeeded - Booking ${paymentRecord.booking_id} CONFIRMED`);
 
+      // 5. Create Stripe invoice (non-blocking — do not fail webhook on invoice error)
+      try {
+        const { StripeInvoiceService } = await import('./StripeInvoiceService');
+        const invoiceResult = await StripeInvoiceService.createInvoiceForBooking(paymentRecord.booking_id);
+        if (invoiceResult.success) {
+          console.log(`✅ WebhookService: Invoice ${invoiceResult.invoiceId} created for booking ${paymentRecord.booking_id}`);
+        } else {
+          console.error(`⚠️ WebhookService: Invoice creation failed (non-blocking): ${invoiceResult.error}`);
+        }
+      } catch (invoiceError: any) {
+        console.error('⚠️ WebhookService: Unexpected error creating invoice (non-blocking):', invoiceError);
+      }
+
       return {
         success: true,
         data: {
