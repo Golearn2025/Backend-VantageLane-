@@ -67,10 +67,10 @@ export async function handleReturnPricing(
       request.additionalStops
     );
 
-    // 2. Normalize return route
+    // 2. Normalize return route (default: reverse of outbound if not provided)
     const returnRoute = normalizeRoute(
-      request.returnPickup,
-      request.returnDropoff,
+      request.returnPickup ?? request.dropoff,
+      request.returnDropoff ?? request.pickup,
       request.returnAdditionalStops
     );
 

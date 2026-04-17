@@ -71,10 +71,10 @@ export function buildReturnLegs(
     legNumber: 2,
     legKind: 'return',
     vehicleType: request.vehicleType,
-    pickup: request.returnPickup,
-    dropoff: request.returnDropoff,
+    pickup: request.returnPickup ?? request.dropoff,
+    dropoff: request.returnDropoff ?? request.pickup,
     stops: request.returnAdditionalStops,
-    scheduledAt: request.returnDateTime,
+    scheduledAt: request.returnDateTime ?? request.dateTime,
     route: returnRoute,
   };
 
