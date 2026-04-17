@@ -9,14 +9,14 @@ services:
       - key: NODE_ENV
         value: production
       - key: SUPABASE_URL
-        value: https://ruskhucrvjvuuzwlboqn.supabase.co
+        sync: false
       - key: SUPABASE_ANON_KEY
-        value: sb_publishable_K_gxlwerNqOy6iMkE-kzgA_W52Mc5SB
+        sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
-        value: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ1c2todWNydmp2dXV6d2xib3FuIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTU0OTkzMiwiZXhwIjoyMDg3MTI1OTMyfQ.U_u-k4JynhhDx4GfQ0zBCzqrM6FzMCnwTg6Puplp76Q
+        sync: false
       - key: STRIPE_SECRET_KEY
-        value: sk_test_51S67rdD3AaQDXJX4T8fuW0B6ll6T9eCT5epbeXaN6gV75VQkS6zBdKQdofXZXbwmhUWrygAwoBvoU1HJPvbhrJZa00f8QXJnOc
+        sync: false
       - key: STRIPE_WEBHOOK_SECRET
-        value: whsec_2f7a6a3e75ccf8f054869572f0aaf7ece0567eb16c3fa7098e132a66aa760f59
+        sync: false
       - key: DEFAULT_ORGANIZATION_ID
-        value: 9a5caade-4791-4860-93b5-12b1c4fa9830
+        sync: false
