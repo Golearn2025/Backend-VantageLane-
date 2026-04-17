@@ -67,7 +67,10 @@ export class StripeInvoiceService {
         apiVersion: '2026-02-25.clover'
       });
 
-      let stripeCustomerId: string | null = payment.stripe_customer_id ?? null;
+      // stripe_customer_id in booking_payments may store an internal UUID instead of a real
+      // Stripe customer ID (cus_...). Only use it if it looks like a Stripe ID.
+      let stripeCustomerId: string | null =
+        payment.stripe_customer_id?.startsWith('cus_') ? payment.stripe_customer_id : null;
 
       if (!stripeCustomerId && payment.receipt_email) {
         const existing = await stripe.customers.list({
