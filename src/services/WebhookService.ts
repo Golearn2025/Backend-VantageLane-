@@ -256,17 +256,28 @@ export class WebhookService {
       console.log(`✅ WebhookService: Payment succeeded - Booking ${paymentRecord.booking_id} CONFIRMED`);
 
       // 5. Create Stripe invoice (non-blocking — do not fail webhook on invoice error)
+      let invoiceDebug: Record<string, any> = {};
       try {
         const { StripeInvoiceService } = await import('./StripeInvoiceService');
         const invoiceResult = await StripeInvoiceService.createInvoiceForBooking(paymentRecord.booking_id);
         if (invoiceResult.success) {
           console.log(`✅ WebhookService: Invoice ${invoiceResult.invoiceId} created for booking ${paymentRecord.booking_id}`);
+          invoiceDebug = { invoice_id: invoiceResult.invoiceId, status: 'created' };
         } else {
           console.error(`⚠️ WebhookService: Invoice creation failed (non-blocking): ${invoiceResult.error}`);
+          invoiceDebug = { status: 'failed', error: invoiceResult.error };
         }
       } catch (invoiceError: any) {
         console.error('⚠️ WebhookService: Unexpected error creating invoice (non-blocking):', invoiceError);
+        invoiceDebug = { status: 'exception', error: invoiceError?.message, stack: invoiceError?.stack?.slice(0, 300) };
       }
+      // Persist invoice debug info to stripe_events so it's visible without Render logs
+      try {
+        await supabase.from('stripe_events')
+          .update({ metadata: invoiceDebug })
+          .eq('booking_id', paymentRecord.booking_id)
+          .eq('event_type', 'payment_intent.succeeded');
+      } catch { /* best-effort */ }
 
       return {
         success: true,
