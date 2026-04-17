@@ -60,7 +60,7 @@ app.use('/api/stripe/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// Development auth middleware (only in development)
+// Organization context middleware — injects req.user.organizationId from DEFAULT_ORGANIZATION_ID env var
 app.use('/api/pricing/calculate-and-quote', devAuthMiddleware);
 app.use('/api/pricing/convert-quote-to-booking', devAuthMiddleware);
 app.use('/api/pricing/preview-all-categories', devAuthMiddleware);
