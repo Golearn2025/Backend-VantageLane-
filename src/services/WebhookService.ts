@@ -259,7 +259,7 @@ export class WebhookService {
       let invoiceDebug: Record<string, any> = {};
       try {
         const { StripeInvoiceService } = await import('./StripeInvoiceService');
-        const invoiceResult = await StripeInvoiceService.createInvoiceForBooking(paymentRecord.booking_id);
+        const invoiceResult = await StripeInvoiceService.createInvoiceForBooking(paymentRecord.booking_id, paymentIntent.id);
         if (invoiceResult.success) {
           console.log(`✅ WebhookService: Invoice ${invoiceResult.invoiceId} created for booking ${paymentRecord.booking_id}`);
           invoiceDebug = { invoice_id: invoiceResult.invoiceId, status: 'created' };
