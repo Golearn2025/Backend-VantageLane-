@@ -282,6 +282,7 @@ function parseFleet(request: PricingRequestData): ParseResult {
     dropoff: dropoff,
     additionalStops,
     fleetConfig: request.fleetConfig!,
+    fleetVehicles: request.fleetVehicles,
     distance: request.distance,
     duration: request.duration,
     hours: request.hours,
