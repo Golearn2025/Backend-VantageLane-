@@ -160,6 +160,7 @@ function parseReturn(request: PricingRequestData): ParseResult {
     passengers: request.passengers,
     luggage: request.luggage,
     flightNumber: request.flightNumber,
+    returnFlightNumber: request.returnFlightNumber,
     vehicleModel: request.vehicleModel,
     customRequirements: request.customRequirements,
     organizationId: request.organizationId,
