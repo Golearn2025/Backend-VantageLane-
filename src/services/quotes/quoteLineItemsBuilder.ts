@@ -365,6 +365,7 @@ export function buildTripMetadata(requestData: NormalizedPricingRequest): any {
         returnPickup: requestData.returnPickup ?? null,
         returnDropoff: requestData.returnDropoff ?? null,
         returnAdditionalStops: requestData.returnAdditionalStops ?? [],
+        ...(requestData.returnFlightNumber && { returnFlightNumber: requestData.returnFlightNumber }),
         distance: requestData.distance ? Math.round(requestData.distance) : null,
         duration: requestData.duration ? Math.round(requestData.duration) : null
       };

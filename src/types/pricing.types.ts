@@ -124,6 +124,7 @@ export interface PricingRequestData {
   passengers?: number;
   luggage?: number;
   flightNumber?: string;
+  returnFlightNumber?: string;
   customRequirements?: string;
   corporateTier?: string;
   organizationId?: string;
@@ -178,6 +179,7 @@ export interface NormalizedReturnRequest {
   passengers?: number;
   luggage?: number;
   flightNumber?: string;
+  returnFlightNumber?: string;
   vehicleModel?: string;
   customRequirements?: string;
   organizationId?: string;
