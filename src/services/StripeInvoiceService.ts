@@ -6,7 +6,8 @@
  *
  * Design notes:
  * - Payment is already collected via PaymentIntent — invoice is created retroactively
- * - Invoice is finalised and marked paid_out_of_band so Stripe sends the PDF by email
+ * - Invoice is finalised and then the original PaymentIntent is attached via attachPayment,
+ *   so Stripe credits the invoice using the real charge (no paid_out_of_band, no extra lines)
  * - Idempotent: checks metadata.stripe_invoice_id before creating a new invoice
  * - Non-VAT registered: single line item with total amount, no VAT breakdown on invoice
  */
@@ -24,17 +25,22 @@ export interface InvoiceResult {
 export class StripeInvoiceService {
 
   /**
-   * Create and finalise a Stripe invoice for a confirmed booking.
+   * Create and finalise a Stripe invoice for a confirmed booking, then attach
+   * the original PaymentIntent so the invoice is credited via the real charge.
    * Safe to call multiple times — idempotent via metadata check.
+   *
+   * @param bookingId          - internal booking UUID
+   * @param stripePaymentIntentId - the pi_... that already succeeded (preferred);
+   *                             falls back to stripe_payment_intent_id from DB if omitted
    */
-  static async createInvoiceForBooking(bookingId: string): Promise<InvoiceResult> {
+  static async createInvoiceForBooking(bookingId: string, stripePaymentIntentId?: string): Promise<InvoiceResult> {
     try {
       console.log(`🧾 StripeInvoiceService: Creating invoice for booking ${bookingId}`);
 
       // ── 1. Load payment record ────────────────────────────────────────────
       const { data: payment, error: paymentError } = await supabase
         .from('booking_payments')
-        .select('id, stripe_customer_id, receipt_email, amount_pence, currency, metadata')
+        .select('id, stripe_customer_id, stripe_payment_intent_id, receipt_email, amount_pence, currency, metadata')
         .eq('booking_id', bookingId)
         .eq('status', 'succeeded')
         .order('created_at', { ascending: false })
@@ -49,6 +55,13 @@ export class StripeInvoiceService {
       if (payment.metadata?.stripe_invoice_id) {
         console.log(`ℹ️ StripeInvoiceService: Invoice already exists: ${payment.metadata.stripe_invoice_id}`);
         return { success: true, invoiceId: payment.metadata.stripe_invoice_id, alreadyExists: true };
+      }
+
+      // Resolve the PaymentIntent ID: prefer the argument passed in (already in scope
+      // at the webhook call site), fall back to what's persisted in the DB record.
+      const piId = stripePaymentIntentId ?? payment.stripe_payment_intent_id;
+      if (!piId) {
+        throw new Error(`Cannot attach invoice: no Stripe PaymentIntent ID available for booking ${bookingId}`);
       }
 
       // ── 2. Load booking reference ─────────────────────────────────────────
@@ -127,8 +140,14 @@ export class StripeInvoiceService {
       // ── 6. Finalise invoice ───────────────────────────────────────────────
       await stripe.invoices.finalizeInvoice(invoice.id);
 
-      // ── 7. Mark as paid (payment already collected via PaymentIntent) ─────
-      await stripe.invoices.pay(invoice.id, { paid_out_of_band: true });
+      // ── 7. Attach the original PaymentIntent — no new charge ──────────────
+      // The PI is already succeeded, so Stripe credits the invoice immediately
+      // and marks it as paid. This avoids the "paid_out_of_band" anti-pattern
+      // which would create a spurious Cancelled line + an "Out of band" entry
+      // in the dashboard.
+      await stripe.invoices.attachPayment(invoice.id, {
+        payment_intent: piId,
+      });
 
       // ── 8. Persist invoice ID in payment metadata ─────────────────────────
       await supabase
