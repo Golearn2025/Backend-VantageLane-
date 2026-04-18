@@ -104,6 +104,7 @@ export interface PricingRequestData {
 
   // FLEET
   fleetConfig?: Partial<Record<VehicleType, number>>;
+  fleetVehicles?: { category: string; model: string }[]; // Expanded list (one entry per vehicle, with model)
 
   // Compatibility (not source of truth - backend may recompute)
   distance?: number;
@@ -235,6 +236,7 @@ export interface NormalizedFleetRequest {
   dropoff?: TripPoint; // Optional for HOURLY/DAILY, required for ONE_WAY
   additionalStops: TripPoint[];
   fleetConfig: Partial<Record<VehicleType, number>>; // e.g., { executive: 2, luxury: 1 }
+  fleetVehicles?: { category: string; model: string }[]; // Expanded list with model IDs
 
   // For FLEET + ONE_WAY
   distance?: number; // Shared route distance for all vehicles
@@ -417,6 +419,7 @@ export interface LegBreakdown {
   leg_kind: 'main' | 'return' | 'fleet_item'; // Aligned with DB enum
   booking_leg_id?: string; // Real booking_legs.id - MUST exist before creating client_leg_quotes
   vehicle_category?: VehicleType; // For FLEET
+  vehicle_model_id?: string; // Specific model ID (e.g. 'bmw-5-series') - set from fleetVehicles
   vehicle_unit_index?: number; // 1-based index of vehicle instance within booking/fleet expansion
   pickup?: TripPoint;
   dropoff?: TripPoint;
@@ -535,6 +538,7 @@ export interface LegSnapshotData {
   leg_number: number;
   leg_kind: 'main' | 'return' | 'fleet_item';
   vehicle_category?: string;
+  vehicle_model_id?: string;
   vehicle_unit_index?: number;
 
   // Operational data

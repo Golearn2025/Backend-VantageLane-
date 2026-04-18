@@ -182,6 +182,7 @@ export function buildBookingLineItems(
         leg_number: leg.leg_number,
         leg_kind: leg.leg_kind,
         vehicle_category: leg.vehicle_category,
+        vehicle_model_id: leg.vehicle_model_id,
         vehicle_unit_index: leg.vehicle_unit_index,
         pickup: leg.pickup,
         dropoff: leg.dropoff,

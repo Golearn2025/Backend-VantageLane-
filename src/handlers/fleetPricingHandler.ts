@@ -118,10 +118,12 @@ export async function handleFleetPricing(
 
       // Create legs for each vehicle of this type
       for (let i = 0; i < count; i++) {
+        const vehicleModelId = request.fleetVehicles?.[vehicleIndex - 1]?.model ?? undefined;
         const legBreakdown = await calculateFleetVehicleLegPricing(
           vehicleIndex,
           vehicleType as VehicleType,
-          request
+          request,
+          vehicleModelId
         );
         legs.push(legBreakdown);
         vehicleIndex++;
@@ -266,7 +268,8 @@ export async function handleFleetPricing(
 async function calculateFleetVehicleLegPricing(
   vehicleIndex: number,
   vehicleType: VehicleType,
-  request: NormalizedFleetRequest
+  request: NormalizedFleetRequest,
+  vehicleModelId?: string
 ): Promise<LegBreakdown> {
   // For FLEET + HOURLY/DAILY, dropoff is optional (chauffeur may stay at pickup)
   // For FLEET + ONE_WAY, dropoff is required
@@ -447,6 +450,7 @@ async function calculateFleetVehicleLegPricing(
     leg_number: vehicleIndex,
     leg_kind: 'fleet_item',
     vehicle_category: vehicleType,
+    vehicle_model_id: vehicleModelId,
     pickup: operationalLeg.pickup,
     dropoff: operationalLeg.dropoff,
     stops: operationalLeg.stops,
