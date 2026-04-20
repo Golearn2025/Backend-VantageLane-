@@ -283,20 +283,40 @@ export class InvoiceWebhookHandler {
     }
 
     // ---- Confirm booking (idempotent transition) ----------------------------
-    const { error: bookingErr } = await supabase
+    // We treat the booking confirmation as CRITICAL: if it fails we surface
+    // the error so the webhook is retried by Stripe. This is safe because:
+    //   - the booking_payments update above uses `.neq('status','succeeded')`
+    //     so retries won't double-apply it
+    //   - the bookings update below is idempotent (status='CONFIRMED' from any
+    //     of the allow-listed source states)
+    // Without this, a transient DB issue (or a missing trigger allow-rule)
+    // would leave the booking stuck in AWAITING_INVOICE_CONFIRM forever even
+    // though Stripe has the money.
+    const { data: confirmed, error: bookingErr } = await supabase
       .from('bookings')
       .update({
         status: 'CONFIRMED',
         updated_at: new Date().toISOString(),
       })
       .eq('id', payment.booking_id)
-      .in('status', ['NEW', 'PENDING_PAYMENT', 'PAYMENT_FAILED', 'AWAITING_INVOICE_PAYMENT', 'AWAITING_INVOICE_CONFIRM']);
+      .in('status', ['NEW', 'PENDING_PAYMENT', 'PAYMENT_FAILED', 'AWAITING_INVOICE_PAYMENT', 'AWAITING_INVOICE_CONFIRM'])
+      .select('id, status');
 
     if (bookingErr) {
-      console.error('⚠️ [InvoiceWH] Failed to confirm booking (non-blocking):', bookingErr.message);
+      console.error('❌ [InvoiceWH] Failed to confirm booking — will retry:', bookingErr.message);
+      return {
+        success: false,
+        error: `Failed to confirm booking ${payment.booking_id} after invoice.paid: ${bookingErr.message}`,
+      };
     }
 
-    console.log(`✅ [InvoiceWH] invoice.paid → booking ${payment.booking_id} CONFIRMED (invoice ${invoice.id})`);
+    // If 0 rows updated, the booking is already in a terminal post-confirmation
+    // state (CONFIRMED/IN_PROGRESS/COMPLETED) — that is also "success".
+    const matched = confirmed?.length ?? 0;
+    console.log(
+      `✅ [InvoiceWH] invoice.paid → booking ${payment.booking_id} CONFIRMED ` +
+      `(invoice ${invoice.id}, rows_updated=${matched})`,
+    );
 
     return {
       success: true,
