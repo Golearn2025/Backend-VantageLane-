@@ -45,7 +45,7 @@ export class QuotePersistenceService {
       // Calculate totals
       const subtotalPence = Math.round(breakdown.subtotal * 100);
       const discountPence = Math.round(breakdown.discounts.total * 100);
-      const totalPence = Math.round((pricingResult.finalPrice || 0) * 100);
+      const totalPence = Math.round(pricingResult.finalPrice || 0) * 100;
       const vatPence = 0; // Phase 2A: VAT calculated later
       const vatRate = 0;
 
@@ -243,7 +243,7 @@ export class QuotePersistenceService {
     const discountPence = 0; // Discounts applied at booking level
     const vatRate = 0.20;
     const vatPence = Math.round(subtotalPence * vatRate);
-    const totalPence = Math.round(leg.pricing.finalPrice * 100);
+    const totalPence = Math.round(leg.pricing.finalPrice) * 100;
 
     const lineItems = buildLegLineItems(
       leg.pricing,

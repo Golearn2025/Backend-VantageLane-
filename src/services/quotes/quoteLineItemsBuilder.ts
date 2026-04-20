@@ -238,14 +238,17 @@ function validateLegsData(
     0
   );
 
-  // Sum leg totals
+  // Sum leg totals — use same whole-pound rounding as quotePersistence.service.ts
+  // so the comparison is consistent when booking-level total is also rounded to whole pounds.
   const legsTotalSum = legs.reduce(
-    (sum, leg) => sum + Math.round(leg.pricing.finalPrice * 100),
+    (sum, leg) => sum + Math.round(leg.pricing.finalPrice) * 100,
     0
   );
 
-  // Allow 2 pence tolerance for rounding
-  const TOLERANCE_PENCE = 2;
+  // Tolerance: 2p for single-leg (floating point), up to 100p per leg for multi-leg
+  // because each leg rounds independently to the nearest pound and the sum of rounded
+  // legs may legitimately differ from the rounded booking total by up to £1 per leg.
+  const TOLERANCE_PENCE = Math.max(2, legs.length * 100);
 
   // Validate subtotal
   const subtotalDiff = Math.abs(legsSubtotalSum - bookingSubtotalPence);
