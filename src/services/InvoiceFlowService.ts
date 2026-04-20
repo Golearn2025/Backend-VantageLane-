@@ -510,6 +510,11 @@ export class InvoiceFlowService {
       throw new Error(`Booking ${bookingId} has no resolvable amount (no quote, no payment)`);
     }
 
+    // Always round to an integer number of pence before sending to Stripe.
+    // Stripe requires integer amounts; a floating-point pence value (e.g. 9283.4)
+    // would be silently truncated by some SDK versions or cause API errors.
+    amountPence = Math.round(amountPence);
+
     const { data: customer } = await supabase
       .from('customers')
       .select('id, email')
