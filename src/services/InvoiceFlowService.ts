@@ -167,7 +167,7 @@ export class InvoiceFlowService {
         dbCurrency: booking.dbCurrency,
         receiptEmail: booking.receiptEmail,
         invoice: draft,
-        rowStatus: 'draft',
+        rowStatus: 'unpaid',
         sent: false,
         flow: 'invoice_first_send',
       });
@@ -288,7 +288,7 @@ export class InvoiceFlowService {
         dbCurrency: booking.dbCurrency,
         receiptEmail: booking.receiptEmail,
         invoice: draft,
-        rowStatus: 'draft',
+        rowStatus: 'unpaid',
         sent: false,
         flow: 'invoice_first_charge',
       });
@@ -617,7 +617,7 @@ export class InvoiceFlowService {
     dbCurrency: string;
     receiptEmail: string | null;
     invoice: Stripe.Invoice;
-    rowStatus: 'draft' | 'pending' | 'succeeded';
+    rowStatus: 'unpaid' | 'pending' | 'succeeded';
     sent: boolean;
     flow: InvoiceFlow;
   }): Promise<void> {
