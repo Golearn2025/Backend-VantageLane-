@@ -42,10 +42,11 @@ export class QuotePersistenceService {
         throw new Error('Missing bookingBreakdown in PricingResult');
       }
 
-      // Calculate totals
-      const subtotalPence = Math.round(breakdown.subtotal * 100);
-      const discountPence = Math.round(breakdown.discounts.total * 100);
-      const totalPence = Math.round((pricingResult.finalPrice || 0) * 100);
+      // Calculate totals — round to nearest whole pound (× 100) so that DB,
+      // frontend display, and Stripe all show the same integer-pound amount.
+      const subtotalPence = Math.round(breakdown.subtotal) * 100;
+      const discountPence = Math.round(breakdown.discounts.total) * 100;
+      const totalPence = Math.round(pricingResult.finalPrice || 0) * 100;
       const vatPence = 0; // Phase 2A: VAT calculated later
       const vatRate = 0;
 
@@ -239,11 +240,11 @@ export class QuotePersistenceService {
 
     const bookingLegId = leg.booking_leg_id;
 
-    const subtotalPence = Math.round(leg.pricing.subtotal * 100);
+    const subtotalPence = Math.round(leg.pricing.subtotal) * 100;
     const discountPence = 0; // Discounts applied at booking level
     const vatRate = 0.20;
     const vatPence = Math.round(subtotalPence * vatRate);
-    const totalPence = Math.round(leg.pricing.finalPrice * 100);
+    const totalPence = Math.round(leg.pricing.finalPrice) * 100;
 
     const lineItems = buildLegLineItems(
       leg.pricing,
@@ -308,8 +309,8 @@ export class QuotePersistenceService {
       throw new Error('Missing bookingBreakdown in PricingResult');
     }
 
-    const subtotalPence = Math.round(breakdown.subtotal * 100);
-    const discountPence = Math.round(breakdown.discounts.total * 100);
+    const subtotalPence = Math.round(breakdown.subtotal) * 100;
+    const discountPence = Math.round(breakdown.discounts.total) * 100;
     const vatRate = 0.20;
     const vatPence = Math.round(subtotalPence * vatRate);
     const totalPence = subtotalPence + vatPence - discountPence;
