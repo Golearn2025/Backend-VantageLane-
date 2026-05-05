@@ -39,7 +39,7 @@ export class FeeCalculators {
     breakdown.details.push({
       component: 'base_fare',
       amount: breakdown.baseFare,
-      description: `${rates.vehicle_category} base fare`
+      description: `${rates.vehicle_category_id ?? request.vehicleType} base fare`
     });
   }
 
