@@ -383,6 +383,7 @@ export class FeeCalculators {
   /**
    * Apply minimum fare policy
    * Reads from: v_pricing_vehicle_rates
+   * @deprecated Use applyMinimumFareToFinal instead (checks finalPrice after discounts)
    */
   static async applyMinimumFare(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
     if (!request.vehicleType) {
@@ -404,6 +405,39 @@ export class FeeCalculators {
         component: 'minimum_fare',
         amount: adjustment,
         description: `Minimum fare adjustment (£${minimumFare} minimum)`
+      });
+    }
+  }
+
+  /**
+   * Apply minimum fare to finalPrice (after discounts).
+   * Skips silently if minimum_fare_pence is null/0 in DB.
+   *
+   * Called AFTER: calculateBaseFare → distance/time fees → multipliers → discounts → finalPrice
+   */
+  static async applyMinimumFareToFinal(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
+    if (!request.vehicleType) return;
+
+    const rates = await PricingDataService.getVehicleRates(
+      request.vehicleType,
+      request.bookingType,
+      request.organizationId
+    );
+
+    // Skip if no minimum configured
+    if (!rates.minimum_fare_pence) return;
+
+    const minimumFare = PricingDataService.penceToPounds(rates.minimum_fare_pence);
+    if (!minimumFare || minimumFare <= 0) return;
+
+    if (breakdown.finalPrice < minimumFare) {
+      const adjustment = minimumFare - breakdown.finalPrice;
+      breakdown.finalPrice = minimumFare;
+
+      breakdown.details.push({
+        component: 'minimum_fare',
+        amount: adjustment,
+        description: `Minimum fare applied (£${minimumFare.toFixed(2)} minimum)`
       });
     }
   }

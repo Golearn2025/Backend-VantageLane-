@@ -274,6 +274,9 @@ async function calculateLegPricing(
   // Note: Discount applied at booking level, not per leg
   breakdown.finalPrice = breakdown.subtotal;
 
+  // Apply minimum fare per leg
+  await FeeCalculators.applyMinimumFareToFinal(breakdown, legacyRequest);
+
   // Map to LegBreakdown.pricing structure (explicit mapping, not direct assignment)
   return {
     leg_number: legType === 'outbound' ? 1 : 2,

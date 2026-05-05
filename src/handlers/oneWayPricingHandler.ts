@@ -276,6 +276,9 @@ async function calculateLegPricing(
   // Calculate final price (subtotal already includes multipliers)
   breakdown.finalPrice = breakdown.subtotal - breakdown.discounts.total;
 
+  // Apply minimum fare: if finalPrice < minimum_fare_pence → bump up to minimum
+  await FeeCalculators.applyMinimumFareToFinal(breakdown, legacyRequest);
+
   // Build LegBreakdown
   const legBreakdown: LegBreakdown = {
     leg_number: leg.legNumber,

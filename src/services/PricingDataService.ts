@@ -69,7 +69,13 @@ const cache = new DataCache();
 export class PricingDataService {
 
   /**
-   * Get active pricing version
+   * Get active pricing version.
+   *
+   * Uses maybeSingle() so that:
+   *   - 0 rows → data is null  → clear "no active version" error
+   *   - 2+ rows → Supabase PGRST116 error → clear "multiple active versions" error
+   * The DB-level unique partial index (only_one_active_pricing_version) is the
+   * primary guard; this method is the last-resort code guard.
    */
   static async getActivePricingVersion(): Promise<any> {
     const cacheKey = 'active_version';
@@ -80,11 +86,24 @@ export class PricingDataService {
       .from('pricing_versions')
       .select('*')
       .eq('is_active', true)
-      .single();
+      .maybeSingle();
 
     if (error) {
       console.error('Error fetching active pricing version:', error);
+      if (error.code === 'PGRST116') {
+        throw new Error(
+          'Multiple active pricing versions detected. Exactly one pricing version must be active. ' +
+          'Deactivate the duplicates in the Admin → Pricing → Versions panel.'
+        );
+      }
       throw new Error(`Failed to fetch active pricing version: ${error.message}`);
+    }
+
+    if (!data) {
+      throw new Error(
+        'No active pricing version found. Pricing cannot be calculated. ' +
+        'Go to Admin → Pricing → Versions and activate a version.'
+      );
     }
 
     cache.set(cacheKey, data);
