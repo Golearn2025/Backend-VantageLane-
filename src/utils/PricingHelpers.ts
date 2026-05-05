@@ -24,24 +24,35 @@ export class PricingHelpers {
     const day = dateTime.getUTCDay(); // 0 = Sunday, 6 = Saturday
     const timeString = `${hour.toString().padStart(2, '0')}:00`;
 
-    // Weekend check
-    if (config.weekend.days.includes(day)) {
+    // Weekend check (DB-built configs may omit `weekend`; avoid throwing)
+    const weekendDays = config.weekend?.days ?? DEFAULT_TIME_CONFIG.weekend.days;
+    if (weekendDays.includes(day)) {
       return TimePeriod.WEEKEND;
     }
 
     // Peak hours check
-    if (this.isInTimeRange(timeString, config.peak_morning) && 
-        config.peak_morning.days.includes(day)) {
+    if (
+      config.peak_morning?.start &&
+      config.peak_morning?.end &&
+      config.peak_morning?.days &&
+      this.isInTimeRange(timeString, config.peak_morning) &&
+      config.peak_morning.days.includes(day)
+    ) {
       return TimePeriod.PEAK_MORNING;
     }
 
-    if (this.isInTimeRange(timeString, config.peak_evening) && 
-        config.peak_evening.days.includes(day)) {
+    if (
+      config.peak_evening?.start &&
+      config.peak_evening?.end &&
+      config.peak_evening?.days &&
+      this.isInTimeRange(timeString, config.peak_evening) &&
+      config.peak_evening.days.includes(day)
+    ) {
       return TimePeriod.PEAK_EVENING;
     }
 
     // Night check
-    if (this.isInTimeRange(timeString, config.night)) {
+    if (config.night?.start && config.night?.end && this.isInTimeRange(timeString, config.night)) {
       return TimePeriod.NIGHT;
     }
 
