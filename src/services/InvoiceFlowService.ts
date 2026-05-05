@@ -88,6 +88,15 @@ interface ResolvedBooking {
   currency: string;          // lowercase (Stripe convention)
   dbCurrency: string;        // uppercase (DB convention)
   receiptEmail: string | null;
+  /** One or more line items to create on the Stripe invoice.
+   *  Sum of amount_pence == amountPence (guaranteed by builder).
+   *  Falls back to a single item with amountPence when quote data is missing. */
+  invoiceItems: InvoiceLineItem[];
+}
+
+interface InvoiceLineItem {
+  description: string;
+  amount_pence: number;
 }
 
 type InvoiceFlow = 'invoice_first_send' | 'invoice_first_charge';
@@ -172,16 +181,19 @@ export class InvoiceFlowService {
         flow: 'invoice_first_send',
       });
 
-      // ---- 3) Add line item (idempotent) -----------------------------------
-      await stripe.invoiceItems.create({
-        customer: customerId,
-        invoice: draft.id,
-        description: `Chauffeur Service — Booking ${booking.reference}`,
-        amount: booking.amountPence,
-        currency: booking.currency,
-      }, {
-        idempotencyKey: this.idempotencyKey(bookingId, attemptNo, 'invoice_item_send'),
-      });
+      // ---- 3) Add line items (idempotent, one per invoice item) ---------------
+      for (let i = 0; i < booking.invoiceItems.length; i++) {
+        const item = booking.invoiceItems[i]!;
+        await stripe.invoiceItems.create({
+          customer: customerId,
+          invoice: draft.id,
+          description: item.description,
+          amount: item.amount_pence,
+          currency: booking.currency,
+        }, {
+          idempotencyKey: this.idempotencyKey(bookingId, attemptNo, `invoice_item_send_${i}`),
+        });
+      }
 
       // ---- 4) Finalize (idempotent) ----------------------------------------
       const finalized = await stripe.invoices.finalizeInvoice(draft.id, undefined, {
@@ -293,16 +305,19 @@ export class InvoiceFlowService {
         flow: 'invoice_first_charge',
       });
 
-      // ---- 3) Add line item (idempotent) -----------------------------------
-      await stripe.invoiceItems.create({
-        customer: customerId,
-        invoice: draft.id,
-        description: `Chauffeur Service — Booking ${booking.reference}`,
-        amount: booking.amountPence,
-        currency: booking.currency,
-      }, {
-        idempotencyKey: this.idempotencyKey(bookingId, attemptNo, 'invoice_item_charge'),
-      });
+      // ---- 3) Add line items (idempotent, one per invoice item) ---------------
+      for (let i = 0; i < booking.invoiceItems.length; i++) {
+        const item = booking.invoiceItems[i]!;
+        await stripe.invoiceItems.create({
+          customer: customerId,
+          invoice: draft.id,
+          description: item.description,
+          amount: item.amount_pence,
+          currency: booking.currency,
+        }, {
+          idempotencyKey: this.idempotencyKey(bookingId, attemptNo, `invoice_item_charge_${i}`),
+        });
+      }
 
       // ---- 4) Finalize with expanded confirmation_secret -------------------
       const finalized = await stripe.invoices.finalizeInvoice(draft.id, {
@@ -458,6 +473,106 @@ export class InvoiceFlowService {
   }
 
   // --------------------------------------------------------------------------
+  // Invoice line item builder
+  // --------------------------------------------------------------------------
+
+  /**
+   * Build the list of individual line items for a Stripe invoice.
+   *
+   * Strategy (in priority order):
+   *   1. If extras IDs are known (from line_items.meta.trip.extras) and
+   *      vehicle_subtotal_pence is available:
+   *      - Fetch each extra's name + price from service_items table.
+   *      - Show each paid extra as its own line.
+   *      - Transport = totalPence − sum(extras) so the total always matches.
+   *   2. If only the vehicle/services split is available (no extras IDs):
+   *      - Show "Chauffeur service" and "Premium services" proportionally.
+   *   3. Fallback: single line item with the full total.
+   *
+   * The sum of all returned amount_pence values is always == totalPence.
+   */
+  private static async buildInvoiceLineItems(
+    reference: string,
+    totalPence: number,
+    vehicleSubtotalPence: number | null,
+    servicesSubtotalPence: number | null,
+    extrasIds: string[] | null,
+  ): Promise<InvoiceLineItem[]> {
+    const tag = '[InvoiceFlow][lineItems]';
+
+    // ── Strategy 1: known extras IDs ──────────────────────────────────────
+    if (
+      extrasIds && extrasIds.length > 0 &&
+      vehicleSubtotalPence !== null && vehicleSubtotalPence > 0
+    ) {
+      try {
+        const extras = await this.resolveExtrasFromServiceItems(extrasIds);
+
+        if (extras.length > 0) {
+          const extrasTotalPence = extras.reduce((s, e) => s + e.amount_pence, 0);
+          // Transport absorbs VAT, discount, rounding — always > 0 for real bookings.
+          const transportPence = totalPence - extrasTotalPence;
+
+          if (transportPence > 0) {
+            return [
+              { description: `Chauffeur service — Booking ${reference}`, amount_pence: transportPence },
+              ...extras,
+            ];
+          }
+          // Safety: if extras somehow exceed total, fall through to strategy 2.
+          console.warn(`${tag} extras sum (${extrasTotalPence}p) >= total (${totalPence}p) — falling back`);
+        }
+      } catch (err) {
+        console.warn(`${tag} service_items lookup failed:`, err);
+        // Non-fatal — fall through to strategy 2/3.
+      }
+    }
+
+    // ── Strategy 2: vehicle / services split (no individual extras names) ─
+    if (
+      vehicleSubtotalPence !== null && vehicleSubtotalPence > 0 &&
+      servicesSubtotalPence !== null && servicesSubtotalPence > 0
+    ) {
+      const subtotal = vehicleSubtotalPence + servicesSubtotalPence;
+      // Distribute totalPence proportionally; last item gets the remainder.
+      const transportPence = Math.round(vehicleSubtotalPence / subtotal * totalPence);
+      const servicesPence = totalPence - transportPence;
+      return [
+        { description: `Chauffeur service — Booking ${reference}`, amount_pence: transportPence },
+        { description: `Premium services — Booking ${reference}`, amount_pence: servicesPence },
+      ];
+    }
+
+    // ── Strategy 3: fallback — single item ───────────────────────────────
+    return [
+      { description: `Chauffeur Service — Booking ${reference}`, amount_pence: totalPence },
+    ];
+  }
+
+  /**
+   * Resolve display names + prices for a list of service item IDs.
+   * Returns only the items that were actually found in the service_items table.
+   */
+  private static async resolveExtrasFromServiceItems(
+    ids: string[],
+  ): Promise<InvoiceLineItem[]> {
+    if (!ids.length) return [];
+
+    const { data, error } = await supabase
+      .from('service_items')
+      .select('id, name, price_pence')
+      .in('id', ids)
+      .eq('is_active', true);
+
+    if (error || !data) return [];
+
+    return data.map(item => ({
+      description: item.name ?? item.id,
+      amount_pence: Math.round(item.price_pence ?? 0),
+    })).filter(i => i.amount_pence > 0);
+  }
+
+  // --------------------------------------------------------------------------
   // Helpers
   // --------------------------------------------------------------------------
 
@@ -488,7 +603,7 @@ export class InvoiceFlowService {
     let amountPence = 0;
     const { data: quote } = await supabase
       .from('client_booking_quotes')
-      .select('total_pence')
+      .select('total_pence, vehicle_subtotal_pence, services_subtotal_pence, line_items')
       .eq('booking_id', bookingId)
       .order('created_at', { ascending: false })
       .limit(1)
@@ -515,6 +630,15 @@ export class InvoiceFlowService {
     // would be silently truncated by some SDK versions or cause API errors.
     amountPence = Math.round(amountPence);
 
+    // Build individual invoice line items from quote data (Etapa 1).
+    const invoiceItems = await this.buildInvoiceLineItems(
+      booking.reference ?? bookingId.slice(0, 8).toUpperCase(),
+      amountPence,
+      quote?.vehicle_subtotal_pence ?? null,
+      quote?.services_subtotal_pence ?? null,
+      (quote?.line_items as any)?.meta?.trip?.extras ?? null,
+    );
+
     const { data: customer } = await supabase
       .from('customers')
       .select('id, email')
@@ -537,6 +661,7 @@ export class InvoiceFlowService {
       currency: dbCurrency.toLowerCase(),
       dbCurrency,
       receiptEmail,
+      invoiceItems,
     };
   }
 
