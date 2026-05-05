@@ -26,7 +26,7 @@ interface CacheEntry<T> {
 // In-memory cache with 5-minute TTL
 class DataCache {
   private cache: Map<string, CacheEntry<any>> = new Map();
-  private readonly TTL_MS = 5 * 60 * 1000; // 5 minutes
+  private readonly TTL_MS = 30 * 1000; // 30 seconds
 
   set<T>(key: string, data: T): void {
     this.cache.set(key, {
