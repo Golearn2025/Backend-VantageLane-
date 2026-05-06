@@ -165,6 +165,7 @@ export class QuoteToBookingService {
 
             if (pAddr) {
               locRows.push({
+                booking_id: result.booking_id,
                 booking_leg_id: leg.id,
                 organization_id: organizationId,
                 location_role: 'pickup',
@@ -187,6 +188,7 @@ export class QuoteToBookingService {
 
             if (dAddr) {
               locRows.push({
+                booking_id: result.booking_id,
                 booking_leg_id: leg.id,
                 organization_id: organizationId,
                 location_role: 'dropoff',
