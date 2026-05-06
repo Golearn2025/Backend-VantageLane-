@@ -318,6 +318,14 @@ function normalizeTripPoint(
     address: input.address,
     coordinates: normalizeCoordinates(input.coordinates),
     type: input.type,
+    // Pass enriched location fields through unchanged
+    ...(input.postcode !== undefined && { postcode: input.postcode }),
+    ...(input.outcode !== undefined && { outcode: input.outcode }),
+    ...(input.city !== undefined && { city: input.city }),
+    ...(input.area !== undefined && { area: input.area }),
+    ...(input.country !== undefined && { country: input.country }),
+    ...(input.addressComponents !== undefined && { addressComponents: input.addressComponents }),
+    ...(input.rawPlace !== undefined && { rawPlace: input.rawPlace }),
   };
 
   return normalized;

@@ -62,6 +62,14 @@ export interface TripPointInput {
   address: string;
   coordinates?: RawCoordinates;
   type?: 'address' | 'airport' | 'hotel' | 'poi';
+  // Enriched location fields (optional, used to populate booking_leg_locations)
+  postcode?: string | null;
+  outcode?: string | null;
+  city?: string | null;
+  area?: string | null;
+  country?: string | null;
+  addressComponents?: object[] | null;
+  rawPlace?: unknown;
 }
 
 /**
@@ -73,6 +81,14 @@ export interface TripPoint {
   address: string;
   coordinates?: Coordinates | null;
   type?: 'address' | 'airport' | 'hotel' | 'poi';
+  // Enriched location fields (optional, used to populate booking_leg_locations)
+  postcode?: string | null;
+  outcode?: string | null;
+  city?: string | null;
+  area?: string | null;
+  country?: string | null;
+  addressComponents?: object[] | null;
+  rawPlace?: unknown;
 }
 
 /**

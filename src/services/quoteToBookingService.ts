@@ -135,13 +135,46 @@ export class QuoteToBookingService {
 
         const trip = quoteForLocs?.line_items?.meta?.trip;
 
-        // trip.pickup / trip.dropoff are objects: { address: string, coordinates: { lat, lng } }
-        const pickupAddress = trip?.pickup?.address ?? null;
-        const dropoffAddress = trip?.dropoff?.address ?? null;
-        const pickupLat = trip?.pickup?.coordinates?.lat ?? null;
-        const pickupLng = trip?.pickup?.coordinates?.lng ?? null;
-        const dropoffLat = trip?.dropoff?.coordinates?.lat ?? null;
-        const dropoffLng = trip?.dropoff?.coordinates?.lng ?? null;
+        // trip.pickup / trip.dropoff are objects with address, coordinates, and optional enriched fields
+        const pickupPoint = trip?.pickup ?? null;
+        const dropoffPoint = trip?.dropoff ?? null;
+        const pickupAddress = pickupPoint?.address ?? null;
+        const dropoffAddress = dropoffPoint?.address ?? null;
+
+        /** Extract enriched fields from a trip point, with fallback regex for postcode/outcode */
+        function extractEnriched(point: any, addr: string | null) {
+          const UK_POSTCODE_REGEX = /([A-Z]{1,2}\d{1,2}[A-Z]?\s?\d[A-Z]{2})/i;
+          let postcode: string | null = point?.postcode ?? null;
+          let outcode: string | null = point?.outcode ?? null;
+          const city: string | null = point?.city ?? null;
+          const area: string | null = point?.area ?? null;
+          let country: string | null = point?.country ?? null;
+          const placeId: string | null = point?.placeId ?? null;
+          const addressComponents = point?.addressComponents ?? null;
+          const rawPlace = point?.rawPlace ?? null;
+
+          // Fallback: extract postcode from address string if not provided by frontend
+          if (!postcode && addr) {
+            const match = addr.match(UK_POSTCODE_REGEX);
+            if (match) {
+              postcode = match[1].toUpperCase().replace(/\s+/, ' ');
+            }
+          }
+          // Fallback: derive outcode from postcode
+          if (!outcode && postcode) {
+            outcode = postcode.split(' ')[0] ?? null;
+          }
+          // Fallback: country = UK if address ends with UK / United Kingdom
+          if (!country && addr) {
+            if (/,?\s*(UK|United Kingdom)\s*$/i.test(addr)) {
+              country = 'UK';
+            }
+          }
+          return { postcode, outcode, city, area, country, placeId, addressComponents, rawPlace };
+        }
+
+        const pickupEnriched  = extractEnriched(pickupPoint,  pickupAddress);
+        const dropoffEnriched = extractEnriched(dropoffPoint, dropoffAddress);
 
         const { data: legs } = await supabase
           .from('booking_legs')
@@ -156,12 +189,14 @@ export class QuoteToBookingService {
             const isInbound = leg.leg_number === 2;
 
             // Inbound leg (return): swap pickup/dropoff
-            const pAddr = isInbound ? dropoffAddress : pickupAddress;
-            const dAddr = isInbound ? pickupAddress : dropoffAddress;
-            const pLat  = isInbound ? dropoffLat : pickupLat;
-            const pLng  = isInbound ? dropoffLng : pickupLng;
-            const dLat  = isInbound ? pickupLat : dropoffLat;
-            const dLng  = isInbound ? pickupLng : dropoffLng;
+            const pAddr     = isInbound ? dropoffAddress  : pickupAddress;
+            const dAddr     = isInbound ? pickupAddress   : dropoffAddress;
+            const pLat      = isInbound ? (dropoffPoint?.coordinates?.lat ?? null) : (pickupPoint?.coordinates?.lat ?? null);
+            const pLng      = isInbound ? (dropoffPoint?.coordinates?.lng ?? null) : (pickupPoint?.coordinates?.lng ?? null);
+            const dLat      = isInbound ? (pickupPoint?.coordinates?.lat  ?? null) : (dropoffPoint?.coordinates?.lat ?? null);
+            const dLng      = isInbound ? (pickupPoint?.coordinates?.lng  ?? null) : (dropoffPoint?.coordinates?.lng ?? null);
+            const pEnriched = isInbound ? dropoffEnriched : pickupEnriched;
+            const dEnriched = isInbound ? pickupEnriched  : dropoffEnriched;
 
             if (pAddr) {
               locRows.push({
@@ -170,18 +205,18 @@ export class QuoteToBookingService {
                 organization_id: organizationId,
                 location_role: 'pickup',
                 sequence_no: 1,
-                place_id: null,
+                place_id: pEnriched.placeId,
                 lat: pLat,
                 lng: pLng,
                 display_address: pAddr,
                 full_address: pAddr,
-                postcode: null,
-                outcode: null,
-                city: null,
-                area: null,
-                country: null,
-                address_components: null,
-                raw_place: null,
+                postcode: pEnriched.postcode,
+                outcode: pEnriched.outcode,
+                city: pEnriched.city,
+                area: pEnriched.area,
+                country: pEnriched.country,
+                address_components: pEnriched.addressComponents,
+                raw_place: pEnriched.rawPlace,
                 visibility_level: 'full',
               });
             }
@@ -193,18 +228,18 @@ export class QuoteToBookingService {
                 organization_id: organizationId,
                 location_role: 'dropoff',
                 sequence_no: 2,
-                place_id: null,
+                place_id: dEnriched.placeId,
                 lat: dLat,
                 lng: dLng,
                 display_address: dAddr,
                 full_address: dAddr,
-                postcode: null,
-                outcode: null,
-                city: null,
-                area: null,
-                country: null,
-                address_components: null,
-                raw_place: null,
+                postcode: dEnriched.postcode,
+                outcode: dEnriched.outcode,
+                city: dEnriched.city,
+                area: dEnriched.area,
+                country: dEnriched.country,
+                address_components: dEnriched.addressComponents,
+                raw_place: dEnriched.rawPlace,
                 visibility_level: 'full',
               });
             }
