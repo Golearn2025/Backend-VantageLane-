@@ -122,8 +122,94 @@ export class QuoteToBookingService {
         console.log('✅ Financial snapshot created successfully');
       } catch (snapshotError: any) {
         console.error('⚠️  Failed to create financial snapshot:', snapshotError);
-        // Don't fail the booking if snapshot creation fails - log and continue
         console.error('   Booking created successfully but snapshot creation failed');
+      }
+
+      // STEP 5: Populate booking_leg_locations from quote trip metadata (non-blocking)
+      try {
+        const { data: quoteForLocs } = await supabase
+          .from('client_booking_quotes')
+          .select('line_items')
+          .eq('id', quoteId)
+          .single();
+
+        const trip = quoteForLocs?.line_items?.meta?.trip;
+        const coords = trip?.coordinates ?? {};
+
+        const { data: legs } = await supabase
+          .from('booking_legs')
+          .select('id, leg_number')
+          .eq('booking_id', result.booking_id)
+          .order('leg_number', { ascending: true });
+
+        if (legs && legs.length > 0 && trip?.pickup) {
+          const locRows: any[] = [];
+
+          for (const leg of legs) {
+            const isInbound = leg.leg_number === 2;
+
+            // For inbound leg (return): swap pickup/dropoff
+            const pickupAddr = isInbound ? (trip.dropoff ?? null) : (trip.pickup ?? null);
+            const dropoffAddr = isInbound ? (trip.pickup ?? null) : (trip.dropoff ?? null);
+            const pickupCoords = isInbound ? (coords.dropoff ?? coords.destination ?? null) : (coords.pickup ?? coords.origin ?? null);
+            const dropoffCoords = isInbound ? (coords.pickup ?? coords.origin ?? null) : (coords.dropoff ?? coords.destination ?? null);
+
+            if (pickupAddr) {
+              locRows.push({
+                booking_leg_id: leg.id,
+                organization_id: organizationId,
+                location_role: 'pickup',
+                sequence_no: 1,
+                place_id: null,
+                lat: pickupCoords?.lat ?? null,
+                lng: pickupCoords?.lng ?? null,
+                display_address: pickupAddr,
+                full_address: pickupAddr,
+                postcode: pickupCoords?.postcode ?? null,
+                outcode: pickupCoords?.outcode ?? null,
+                city: pickupCoords?.city ?? null,
+                area: pickupCoords?.area ?? null,
+                country: pickupCoords?.country ?? null,
+                address_components: null,
+                raw_place: null,
+                visibility_level: 'full',
+              });
+            }
+
+            if (dropoffAddr) {
+              locRows.push({
+                booking_leg_id: leg.id,
+                organization_id: organizationId,
+                location_role: 'dropoff',
+                sequence_no: 2,
+                place_id: null,
+                lat: dropoffCoords?.lat ?? null,
+                lng: dropoffCoords?.lng ?? null,
+                display_address: dropoffAddr,
+                full_address: dropoffAddr,
+                postcode: dropoffCoords?.postcode ?? null,
+                outcode: dropoffCoords?.outcode ?? null,
+                city: dropoffCoords?.city ?? null,
+                area: dropoffCoords?.area ?? null,
+                country: dropoffCoords?.country ?? null,
+                address_components: null,
+                raw_place: null,
+                visibility_level: 'full',
+              });
+            }
+          }
+
+          if (locRows.length > 0) {
+            const { error: locErr } = await supabase.from('booking_leg_locations').insert(locRows);
+            if (locErr) {
+              console.error('⚠️  booking_leg_locations insert failed (non-blocking):', locErr.message);
+            } else {
+              console.log(`✅ booking_leg_locations populated: ${locRows.length} rows`);
+            }
+          }
+        }
+      } catch (locError: any) {
+        console.error('⚠️  booking_leg_locations step failed (non-blocking):', locError.message);
       }
 
       // Check if RPC already returns reference and amount
