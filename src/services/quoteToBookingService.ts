@@ -134,7 +134,14 @@ export class QuoteToBookingService {
           .single();
 
         const trip = quoteForLocs?.line_items?.meta?.trip;
-        const coords = trip?.coordinates ?? {};
+
+        // trip.pickup / trip.dropoff are objects: { address: string, coordinates: { lat, lng } }
+        const pickupAddress = trip?.pickup?.address ?? null;
+        const dropoffAddress = trip?.dropoff?.address ?? null;
+        const pickupLat = trip?.pickup?.coordinates?.lat ?? null;
+        const pickupLng = trip?.pickup?.coordinates?.lng ?? null;
+        const dropoffLat = trip?.dropoff?.coordinates?.lat ?? null;
+        const dropoffLng = trip?.dropoff?.coordinates?.lng ?? null;
 
         const { data: legs } = await supabase
           .from('booking_legs')
@@ -142,56 +149,58 @@ export class QuoteToBookingService {
           .eq('booking_id', result.booking_id)
           .order('leg_number', { ascending: true });
 
-        if (legs && legs.length > 0 && trip?.pickup) {
+        if (legs && legs.length > 0 && pickupAddress) {
           const locRows: any[] = [];
 
           for (const leg of legs) {
             const isInbound = leg.leg_number === 2;
 
-            // For inbound leg (return): swap pickup/dropoff
-            const pickupAddr = isInbound ? (trip.dropoff ?? null) : (trip.pickup ?? null);
-            const dropoffAddr = isInbound ? (trip.pickup ?? null) : (trip.dropoff ?? null);
-            const pickupCoords = isInbound ? (coords.dropoff ?? coords.destination ?? null) : (coords.pickup ?? coords.origin ?? null);
-            const dropoffCoords = isInbound ? (coords.pickup ?? coords.origin ?? null) : (coords.dropoff ?? coords.destination ?? null);
+            // Inbound leg (return): swap pickup/dropoff
+            const pAddr = isInbound ? dropoffAddress : pickupAddress;
+            const dAddr = isInbound ? pickupAddress : dropoffAddress;
+            const pLat  = isInbound ? dropoffLat : pickupLat;
+            const pLng  = isInbound ? dropoffLng : pickupLng;
+            const dLat  = isInbound ? pickupLat : dropoffLat;
+            const dLng  = isInbound ? pickupLng : dropoffLng;
 
-            if (pickupAddr) {
+            if (pAddr) {
               locRows.push({
                 booking_leg_id: leg.id,
                 organization_id: organizationId,
                 location_role: 'pickup',
                 sequence_no: 1,
                 place_id: null,
-                lat: pickupCoords?.lat ?? null,
-                lng: pickupCoords?.lng ?? null,
-                display_address: pickupAddr,
-                full_address: pickupAddr,
-                postcode: pickupCoords?.postcode ?? null,
-                outcode: pickupCoords?.outcode ?? null,
-                city: pickupCoords?.city ?? null,
-                area: pickupCoords?.area ?? null,
-                country: pickupCoords?.country ?? null,
+                lat: pLat,
+                lng: pLng,
+                display_address: pAddr,
+                full_address: pAddr,
+                postcode: null,
+                outcode: null,
+                city: null,
+                area: null,
+                country: null,
                 address_components: null,
                 raw_place: null,
                 visibility_level: 'full',
               });
             }
 
-            if (dropoffAddr) {
+            if (dAddr) {
               locRows.push({
                 booking_leg_id: leg.id,
                 organization_id: organizationId,
                 location_role: 'dropoff',
                 sequence_no: 2,
                 place_id: null,
-                lat: dropoffCoords?.lat ?? null,
-                lng: dropoffCoords?.lng ?? null,
-                display_address: dropoffAddr,
-                full_address: dropoffAddr,
-                postcode: dropoffCoords?.postcode ?? null,
-                outcode: dropoffCoords?.outcode ?? null,
-                city: dropoffCoords?.city ?? null,
-                area: dropoffCoords?.area ?? null,
-                country: dropoffCoords?.country ?? null,
+                lat: dLat,
+                lng: dLng,
+                display_address: dAddr,
+                full_address: dAddr,
+                postcode: null,
+                outcode: null,
+                city: null,
+                area: null,
+                country: null,
                 address_components: null,
                 raw_place: null,
                 visibility_level: 'full',
