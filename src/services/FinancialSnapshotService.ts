@@ -344,12 +344,20 @@ export class FinancialSnapshotService {
     // Price before VAT = subtotal - discount
     const subtotalExVatPence = subtotalPence - discountPence;
 
-    // Calculate commissions (from subtotal ex VAT)
-    const platformFeePence = Math.round(subtotalExVatPence * settings.platform_commission_pct);
-    const operatorFeePence = Math.round((subtotalExVatPence - platformFeePence) * settings.operator_commission_pct);
+    // Service item fees (flowers, champagne, security escort) are paid by the client for the
+    // actual item. The driver gets a SEPARATE flat bonus via service_item_payout_rules.
+    // Exclude them from the base payout calculation to avoid double-counting.
+    const serviceItemFeesPence = (legQuote.line_items?.components || [])
+      .filter((c: any) => c.code === 'service_item_fees')
+      .reduce((sum: number, c: any) => sum + (c.amount_pence || 0), 0);
 
-    // Calculate base payout (before factor and guardrails)
-    const driverBasePayoutPence = subtotalExVatPence - platformFeePence - operatorFeePence;
+    // Calculate commissions on transport fare only (excluding service item fees)
+    const tripOnlySubtotalExVat = subtotalExVatPence - serviceItemFeesPence;
+    const platformFeePence = Math.round(tripOnlySubtotalExVat * settings.platform_commission_pct);
+    const operatorFeePence = Math.round((tripOnlySubtotalExVat - platformFeePence) * settings.operator_commission_pct);
+
+    // Driver base payout from transport fare only (before factor and guardrails)
+    const driverBasePayoutPence = tripOnlySubtotalExVat - platformFeePence - operatorFeePence;
 
     // Apply pricing factor and guardrails (NEW - aligns with booking-level)
     const payoutCalc = await this.calculateDriverPayoutWithGuardrails(
@@ -385,7 +393,10 @@ export class FinancialSnapshotService {
         driver_pricing_factor: payoutCalc.factorUsed,
         percentage_min_payout: payoutCalc.minGuardrail,
         percentage_max_payout: payoutCalc.maxGuardrail,
-        guardrail_applied: payoutCalc.factorUsed !== null
+        guardrail_applied: payoutCalc.factorUsed !== null,
+        // Audit fields: show exactly what was excluded
+        service_item_fees_pence: serviceItemFeesPence,
+        trip_only_subtotal_ex_vat_pence: tripOnlySubtotalExVat
       }
     };
 
