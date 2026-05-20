@@ -29,7 +29,7 @@ export class BookingTypeHandlers {
     breakdown.subtotal = breakdown.subtotal * 2;
 
     const discountPolicy = await PricingDataService.getReturnDiscountPolicy(
-      request.vehicleType,
+      request.vehicleType ?? '',
       request.organizationId
     );
     const returnDiscountRate = discountPolicy ? discountPolicy.discount_percentage / 100 : 0;
