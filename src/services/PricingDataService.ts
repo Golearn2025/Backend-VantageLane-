@@ -323,20 +323,20 @@ export class PricingDataService {
   }
 
   /**
-   * Get return trip settings
-   * Note: This might be in a separate view or part of version settings
+   * Get return trip settings (discount from pricing_return_rules)
    */
-  static async getReturnSettings(): Promise<any> {
-    const cacheKey = 'return_settings';
-    const cached = cache.get(cacheKey);
+  static async getReturnSettings(organizationId?: string): Promise<{
+    discount_rate: number;
+    minimum_hours_between: number;
+  }> {
+    const cacheKey = `return_settings:${organizationId || 'default'}`;
+    const cached = cache.get<{ discount_rate: number; minimum_hours_between: number }>(cacheKey);
     if (cached) return cached;
 
-    // Assuming return settings are in the version view
-    const version = await this.getActivePricingVersion();
-
+    const policy = await this.getReturnDiscountPolicy('', organizationId);
     const settings = {
-      discount_rate: version.return_discount_rate || 0.10,
-      minimum_hours_between: version.return_minimum_hours || 2
+      discount_rate: policy ? policy.discount_percentage / 100 : 0,
+      minimum_hours_between: 2,
     };
 
     cache.set(cacheKey, settings);
@@ -630,15 +630,55 @@ export class PricingDataService {
   }
 
   /**
-   * Get return discount policy
-   * Returns discount percentage for return bookings
+   * Get return discount policy from pricing_return_rules.
+   * Returns null when inactive, missing, or discount_percent is 0.
    */
-  static async getReturnDiscountPolicy(vehicleType: string, organizationId?: string): Promise<{ discount_percentage: number } | null> {
-    // Return discount policy: typically 10-15% off for round trips
-    // Default: 10% discount
-    return {
-      discount_percentage: 10
-    };
+  static async getReturnDiscountPolicy(
+    _vehicleType: string,
+    organizationId?: string
+  ): Promise<{ discount_percentage: number } | null> {
+    let orgId = organizationId;
+    if (!orgId) {
+      const version = await this.getActivePricingVersion();
+      orgId = version?.organization_id;
+    }
+
+    const cacheKey = `return_discount:${orgId || 'default'}`;
+    const cached = cache.get<{ discount_percentage: number } | 'none'>(cacheKey);
+    if (cached === 'none') return null;
+    if (cached) return cached;
+
+    if (!orgId) {
+      console.warn('getReturnDiscountPolicy: no organization_id — skipping return discount');
+      cache.set(cacheKey, 'none');
+      return null;
+    }
+
+    const { data, error } = await supabase
+      .from('pricing_return_rules')
+      .select('discount_percent, active')
+      .eq('organization_id', orgId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error fetching return discount policy:', error);
+      return null;
+    }
+
+    if (!data?.active) {
+      cache.set(cacheKey, 'none');
+      return null;
+    }
+
+    const discountPercent = parseFloat(String(data.discount_percent ?? 0));
+    if (!Number.isFinite(discountPercent) || discountPercent <= 0) {
+      cache.set(cacheKey, 'none');
+      return null;
+    }
+
+    const policy = { discount_percentage: discountPercent };
+    cache.set(cacheKey, policy);
+    return policy;
   }
 
   /**

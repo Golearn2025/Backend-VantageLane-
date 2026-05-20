@@ -22,25 +22,27 @@ import { PricingDataService } from './PricingDataService';
 export class BookingTypeHandlers {
 
   /**
-   * Apply RETURN trip logic: (subtotal × 2) - discount
-   * Reads from: v_active_pricing_version (return_discount_rate)
+   * Apply RETURN trip logic: (subtotal × 2) - discount from pricing_return_rules
    */
   static async applyReturnTripLogic(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
-    const returnSettings = await PricingDataService.getReturnSettings();
-
     // Double the subtotal for round trip
     breakdown.subtotal = breakdown.subtotal * 2;
 
-    // Apply return discount
-    const returnDiscountRate = 0.10; // 10% discount
+    const discountPolicy = await PricingDataService.getReturnDiscountPolicy(
+      request.vehicleType,
+      request.organizationId
+    );
+    const returnDiscountRate = discountPolicy ? discountPolicy.discount_percentage / 100 : 0;
     const returnDiscount = breakdown.subtotal * returnDiscountRate;
+    if (returnDiscount <= 0) return;
+
     breakdown.discounts.total += returnDiscount;
     breakdown.subtotal -= returnDiscount;
 
     breakdown.details.push({
       component: 'return_discount',
       amount: -returnDiscount,
-      description: `Return trip discount (${(returnSettings.discount_rate * 100).toFixed(0)}%)`
+      description: `Return trip discount (${(returnDiscountRate * 100).toFixed(0)}%)`
     });
   }
 
