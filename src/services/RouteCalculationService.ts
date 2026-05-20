@@ -39,7 +39,8 @@ export class RouteCalculationService {
    * 3. Mark source in result for transparency
    */
   static async calculateRouteMetrics(
-    segments: RouteSegment[]
+    segments: RouteSegment[],
+    departureTime?: Date
   ): Promise<RouteMetricsResult> {
     if (segments.length === 0) {
       throw new Error('Cannot calculate metrics for empty route');
@@ -48,7 +49,7 @@ export class RouteCalculationService {
     // Try Google Maps API first
     if (process.env.GOOGLE_MAPS_API_KEY) {
       try {
-        return await this.calculateWithGoogleMaps(segments);
+        return await this.calculateWithGoogleMaps(segments, departureTime);
       } catch (error) {
         console.warn('Google Maps API failed, falling back to Haversine:', error);
       }
@@ -63,7 +64,8 @@ export class RouteCalculationService {
    * Provides most accurate real-world routing
    */
   private static async calculateWithGoogleMaps(
-    segments: RouteSegment[]
+    segments: RouteSegment[],
+    departureTime?: Date
   ): Promise<RouteMetricsResult> {
     const apiKey = process.env.GOOGLE_MAPS_API_KEY;
     if (!apiKey) {
@@ -88,6 +90,14 @@ export class RouteCalculationService {
       url.searchParams.append('destinations', destination);
       url.searchParams.append('mode', 'driving');
       url.searchParams.append('units', 'imperial'); // miles
+      // Pass departure_time for traffic-aware duration prediction.
+      // Google requires a future or 'now' timestamp; if the departure is in
+      // the past (e.g. testing with old dates) use 'now' as a safe fallback.
+      const depTimestamp = departureTime ? Math.floor(departureTime.getTime() / 1000) : null;
+      const nowTimestamp = Math.floor(Date.now() / 1000);
+      const useTimestamp = depTimestamp && depTimestamp > nowTimestamp ? depTimestamp : nowTimestamp;
+      url.searchParams.append('departure_time', String(useTimestamp));
+      url.searchParams.append('traffic_model', 'best_guess');
       url.searchParams.append('key', apiKey);
 
       const response = await fetch(url.toString());
@@ -102,9 +112,12 @@ export class RouteCalculationService {
         throw new Error(`No route found for segment ${segment.segmentIndex}`);
       }
 
-      // Google returns meters and seconds, convert to miles and minutes
+      // Use duration_in_traffic when available (requires departure_time),
+      // otherwise fall back to standard duration
+      const durationSeconds =
+        element.duration_in_traffic?.value ?? element.duration.value;
       const distanceMiles = element.distance.value / 1609.34; // meters to miles
-      const durationMinutes = element.duration.value / 60; // seconds to minutes
+      const durationMinutes = durationSeconds / 60; // seconds to minutes
 
       segmentMetrics.push({
         segmentIndex: segment.segmentIndex,
@@ -226,17 +239,16 @@ export class RouteCalculationService {
    */
   static async calculateDirectRoute(
     pickup: TripPoint,
-    dropoff: TripPoint
+    dropoff: TripPoint,
+    departureTime?: Date
   ): Promise<RouteMetricsResult> {
-    // Build single segment: pickup → dropoff (no stops)
     const directSegment: RouteSegment = {
       segmentIndex: 0,
       from: { point: pickup, index: 0, type: 'pickup' },
       to: { point: dropoff, index: 1, type: 'dropoff' }
     };
 
-    // Calculate metrics for direct segment using existing logic
-    return await this.calculateRouteMetrics([directSegment]);
+    return await this.calculateRouteMetrics([directSegment], departureTime);
   }
 
   /**

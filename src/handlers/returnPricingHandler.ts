@@ -79,16 +79,19 @@ export async function handleReturnPricing(
     // return trips because the frontend only measures the outbound route and the
     // hint is frequently stale or incorrect, causing a large pricing discrepancy
     // between the two legs. Both legs must be priced on real route data.
+    // Pass departure time so Google returns traffic-aware duration for each leg.
     const outboundMetrics = await calculateRouteMetrics(
       outboundRoute,
       undefined,
-      undefined
+      undefined,
+      request.dateTime ? new Date(request.dateTime) : undefined
     );
 
     const returnMetrics = await calculateRouteMetrics(
       returnRoute,
       undefined,
-      undefined
+      undefined,
+      request.returnDateTime ? new Date(request.returnDateTime) : undefined
     );
 
     // 4. Build operational legs

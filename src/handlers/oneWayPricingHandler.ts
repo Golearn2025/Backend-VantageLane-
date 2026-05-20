@@ -44,8 +44,15 @@ export async function handleOneWayPricing(
     // 1. Normalize route
     const route = normalizeRoute(request.pickup, request.dropoff, request.additionalStops);
 
-    // 2. Calculate route metrics (computes real distance/duration if not provided)
-    const metrics = await calculateRouteMetrics(route, request.distance, request.duration);
+    // 2. Calculate route metrics — always via Google Maps, ignoring any frontend
+    // distance/duration hints. This ensures the price is based on real route data
+    // and not on stale/estimated hints from the client.
+    const metrics = await calculateRouteMetrics(
+      route,
+      undefined,
+      undefined,
+      request.dateTime ? new Date(request.dateTime) : undefined
+    );
 
     // 3. Build operational leg
     const operationalLeg = buildOneWayLeg(request, route);
@@ -338,7 +345,8 @@ async function calculateDualQuoteStopPricing(
   // 1. Calculate direct route metrics (no stops)
   const directMetrics = await RouteCalculationService.calculateDirectRoute(
     request.pickup,
-    request.dropoff
+    request.dropoff,
+    request.dateTime ? new Date(request.dateTime) : undefined
   );
 
   // 2. Calculate detour

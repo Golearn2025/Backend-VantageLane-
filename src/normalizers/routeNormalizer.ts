@@ -107,7 +107,8 @@ export interface RouteMetrics {
 export async function calculateRouteMetrics(
   route: NormalizedRoute,
   providedDistance?: number,
-  providedDuration?: number
+  providedDuration?: number,
+  departureTime?: Date
 ): Promise<RouteMetrics> {
   // If both distance and duration provided, use them
   if (providedDistance !== undefined && providedDuration !== undefined) {
@@ -122,7 +123,7 @@ export async function calculateRouteMetrics(
   // Otherwise, compute from route segments using RouteCalculationService
   try {
     const { RouteCalculationService } = await import('../services/RouteCalculationService');
-    const computed = await RouteCalculationService.calculateRouteMetrics(route.segments);
+    const computed = await RouteCalculationService.calculateRouteMetrics(route.segments, departureTime);
 
     return {
       totalDistance: computed.totalDistance,
