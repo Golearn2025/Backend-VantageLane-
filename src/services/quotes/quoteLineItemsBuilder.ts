@@ -111,10 +111,16 @@ export function buildBookingLineItems(
   dualQuotePricing?: DualQuotePricingLogic,
   legs?: LegBreakdown[]  // 🆕 NEW: Optional legs parameter for multi-leg bookings
 ): LineItems {
-  // Validate legs data consistency if provided
+  // Validate legs data consistency if provided (legs are net; booking total may include VAT)
   if (legs && legs.length > 0) {
-    validateLegsData(legs, subtotalPence, discountPence, totalPence);
+    validateLegsData(legs, subtotalPence, discountPence, totalPence, vatPence);
   }
+
+  const bookingNetTotalPence = totalPence - vatPence;
+  const legVatAllocations =
+    legs && legs.length > 0 && vatPence > 0
+      ? allocateVatAcrossLegs(legs, vatPence, bookingNetTotalPence)
+      : [];
   return {
     components: [
       { code: 'base_fare', label: 'Base fare', amount_pence: Math.round(breakdown.baseFare * 100) },
@@ -178,7 +184,10 @@ export function buildBookingLineItems(
           : `Detour exceeds grace threshold (${dualQuotePricing.graceThresholdMiles}mi / ${dualQuotePricing.graceThresholdMinutes}min) - using full quote`
       } : undefined,
       // 🆕 NEW: Legs snapshot for multi-leg bookings
-      legs: legs && legs.length > 0 ? legs.map(leg => ({
+      legs: legs && legs.length > 0 ? legs.map((leg, index) => {
+        const legNetPence = Math.round(leg.pricing.finalPrice * 100);
+        const legVatPence = legVatAllocations[index] ?? 0;
+        return {
         leg_number: leg.leg_number,
         leg_kind: leg.leg_kind,
         vehicle_category: leg.vehicle_category,
@@ -202,8 +211,8 @@ export function buildBookingLineItems(
           service_item_fees_pence: Math.round(leg.pricing.serviceItemFees * 100),
           subtotal_pence: Math.round(leg.pricing.subtotal * 100),
           discount_pence: Math.round(leg.pricing.discount * 100),
-          vat_pence: 0,  // Currently 0 per leg, VAT calculated at booking level
-          total_pence: Math.round(leg.pricing.finalPrice * 100),
+          vat_pence: legVatPence,
+          total_pence: legNetPence + legVatPence,
           multipliers: leg.pricing.multipliers,
           details: leg.pricing.details.map(d => ({
             component: d.component,
@@ -211,7 +220,8 @@ export function buildBookingLineItems(
             description: d.description
           }))
         }
-      } as import('../../types/pricing.types').LegSnapshotData)) : undefined
+        };
+      }) : undefined
     }
   };
 }
@@ -220,12 +230,41 @@ export function buildBookingLineItems(
  * Validate legs data consistency with booking totals
  * Ensures legs sum matches booking-level amounts (with tolerance for rounding)
  */
+/** Split booking-level VAT across legs by net share; last leg absorbs rounding remainder. */
+function allocateVatAcrossLegs(
+  legs: LegBreakdown[],
+  bookingVatPence: number,
+  bookingNetTotalPence: number
+): number[] {
+  if (bookingVatPence <= 0 || bookingNetTotalPence <= 0) {
+    return legs.map(() => 0);
+  }
+
+  const netPence = legs.map(leg => Math.round(leg.pricing.finalPrice * 100));
+  const allocations: number[] = [];
+  let allocated = 0;
+
+  for (let i = 0; i < netPence.length; i++) {
+    if (i === netPence.length - 1) {
+      allocations.push(bookingVatPence - allocated);
+    } else {
+      const share = Math.round((bookingVatPence * netPence[i]) / bookingNetTotalPence);
+      allocations.push(share);
+      allocated += share;
+    }
+  }
+
+  return allocations;
+}
+
 function validateLegsData(
   legs: LegBreakdown[],
   bookingSubtotalPence: number,
   bookingDiscountPence: number,
-  bookingTotalPence: number
+  bookingTotalPence: number,
+  bookingVatPence: number = 0
 ): void {
+  const bookingNetTotalPence = bookingTotalPence - bookingVatPence;
   // Sum leg subtotals
   const legsSubtotalSum = legs.reduce(
     (sum, leg) => sum + Math.round(leg.pricing.subtotal * 100),
@@ -268,12 +307,12 @@ function validateLegsData(
     );
   }
 
-  // Validate total
-  const totalDiff = Math.abs(legsTotalSum - bookingTotalPence);
+  // Validate net total (leg finalPrice is ex-VAT; booking total_pence includes VAT)
+  const totalDiff = Math.abs(legsTotalSum - bookingNetTotalPence);
   if (totalDiff > TOLERANCE_PENCE) {
     throw new Error(
       `Legs total mismatch: legs sum ${legsTotalSum}p, ` +
-      `booking ${bookingTotalPence}p, diff ${totalDiff}p`
+      `booking net ${bookingNetTotalPence}p (gross ${bookingTotalPence}p, vat ${bookingVatPence}p), diff ${totalDiff}p`
     );
   }
 }
