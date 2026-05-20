@@ -74,15 +74,17 @@ export async function handleReturnPricing(
       request.returnAdditionalStops
     );
 
-    // 3. Calculate route metrics for each leg
-    // Outbound: use provided distance/duration if available
+    // 3. Calculate route metrics for each leg independently via Google Maps.
+    // We intentionally ignore the frontend-provided distance/duration hints for
+    // return trips because the frontend only measures the outbound route and the
+    // hint is frequently stale or incorrect, causing a large pricing discrepancy
+    // between the two legs. Both legs must be priced on real route data.
     const outboundMetrics = await calculateRouteMetrics(
       outboundRoute,
-      request.distance,
-      request.duration
+      undefined,
+      undefined
     );
 
-    // Return: always calculate (no hints provided in request)
     const returnMetrics = await calculateRouteMetrics(
       returnRoute,
       undefined,
