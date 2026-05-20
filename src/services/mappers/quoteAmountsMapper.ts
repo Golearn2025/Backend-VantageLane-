@@ -10,8 +10,11 @@ import { PricingResult, LegBreakdown } from '../../types/pricing.types';
 export interface QuoteAmounts {
   subtotalPence: number;
   discountPence: number;
+  /** Net transport after discount, before VAT (pence) */
+  netPence: number;
   vatPence: number;
   totalPence: number;
+  vatRate: number;
 }
 
 export interface SplitAmounts {
@@ -22,44 +25,55 @@ export interface SplitAmounts {
 export class QuoteAmountsMapper {
   
   /**
-   * Calculate amounts for independent quote (Phase 2A - no VAT)
+   * Client total in pounds: net (finalPrice) + VAT from organization_settings.
    */
-  static calculateIndependentQuoteAmounts(pricingResult: PricingResult): QuoteAmounts {
-    const breakdown = pricingResult.bookingBreakdown;
-    
-    const subtotalPence = Math.round((breakdown?.subtotal || 0) * 100);
-    const discountPence = Math.round((breakdown?.discounts?.total || 0) * 100);
-    const totalPence = Math.round((pricingResult.finalPrice || 0) * 100);
-    
-    // Phase 2A: No VAT calculated
-    const vatPence = 0;
-    
-    return {
-      subtotalPence,
-      discountPence,
-      vatPence,
-      totalPence
-    };
+  static applyVatToNetPricePounds(netPrice: number, vatRate: number): number {
+    const netPence = Math.round((netPrice || 0) * 100);
+    const safeVatRate = Math.max(0, Number(vatRate) || 0);
+    const totalPence = netPence + Math.round(netPence * safeVatRate);
+    return totalPence / 100;
   }
 
   /**
-   * Calculate amounts for booking quote (Phase 2B - with VAT)
+   * Calculate amounts for independent quote (Phase 2A).
+   * VAT rate from organization_settings (0 = unchanged prices).
    */
-  static calculateBookingQuoteAmounts(pricingResult: PricingResult): QuoteAmounts {
+  static calculateIndependentQuoteAmounts(
+    pricingResult: PricingResult,
+    vatRate: number = 0
+  ): QuoteAmounts {
+    return this.calculateClientQuoteAmounts(pricingResult, vatRate);
+  }
+
+  /**
+   * Calculate amounts for booking quote (Phase 2B direct persistence).
+   */
+  static calculateBookingQuoteAmounts(
+    pricingResult: PricingResult,
+    vatRate: number = 0
+  ): QuoteAmounts {
+    return this.calculateClientQuoteAmounts(pricingResult, vatRate);
+  }
+
+  private static calculateClientQuoteAmounts(
+    pricingResult: PricingResult,
+    vatRate: number
+  ): QuoteAmounts {
     const breakdown = pricingResult.bookingBreakdown;
-    
     const subtotalPence = Math.round((breakdown?.subtotal || 0) * 100);
     const discountPence = Math.round((breakdown?.discounts?.total || 0) * 100);
-    const totalPence = Math.round((pricingResult.finalPrice || 0) * 100);
-    
-    // Phase 2B: Calculate VAT at 20%
-    const vatPence = Math.round(totalPence * 0.20);
-    
+    const netPence = Math.round((pricingResult.finalPrice || 0) * 100);
+    const safeVatRate = Math.max(0, Number(vatRate) || 0);
+    const vatPence = Math.round(netPence * safeVatRate);
+    const totalPence = netPence + vatPence;
+
     return {
       subtotalPence,
       discountPence,
+      netPence,
       vatPence,
-      totalPence
+      totalPence,
+      vatRate: safeVatRate,
     };
   }
 
@@ -68,15 +82,19 @@ export class QuoteAmountsMapper {
    */
   static calculateLegQuoteAmounts(leg: LegBreakdown, vatRate: number = 0): QuoteAmounts {
     const subtotalPence = Math.round((leg.pricing?.subtotal || 0) * 100);
-    const discountPence = 0; // Legs don't have discounts
-    const totalPence = subtotalPence;
-    const vatPence = Math.round(totalPence * vatRate);
-    
+    const discountPence = 0;
+    const netPence = Math.round((leg.pricing?.finalPrice ?? leg.pricing?.subtotal ?? 0) * 100);
+    const safeVatRate = Math.max(0, Number(vatRate) || 0);
+    const vatPence = Math.round(netPence * safeVatRate);
+    const totalPence = netPence + vatPence;
+
     return {
       subtotalPence,
       discountPence,
+      netPence,
       vatPence,
-      totalPence
+      totalPence,
+      vatRate: safeVatRate,
     };
   }
 

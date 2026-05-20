@@ -7,6 +7,8 @@
 
 import { Request, Response } from 'express';
 import { PricingEngine } from '../../services/PricingEngine';
+import { OrganizationSettingsService } from '../../services/OrganizationSettingsService';
+import { QuoteAmountsMapper } from '../../services/mappers/quoteAmountsMapper';
 import { parsePricingRequest } from '../../parsers/pricingRequestParser';
 import { VehicleType } from '../../types/pricing.types';
 
@@ -37,6 +39,9 @@ export async function previewAllCategories(req: Request, res: Response) {
       body = { ...body, bookingType: base };
     }
 
+    const settings = await OrganizationSettingsService.getOrganizationSettings(organizationId);
+    const vatRate = settings.vat_rate;
+
     // Calculate prices for all vehicle types in parallel
     const results = await Promise.allSettled(
       ALL_VEHICLE_TYPES.map(async vehicleType => {
@@ -56,7 +61,11 @@ export async function previewAllCategories(req: Request, res: Response) {
           throw new Error(`Pricing failed for ${vehicleType}`);
         }
 
-        return { vehicleType, price: pricingResult.finalPrice, currency: pricingResult.currency || 'GBP' };
+        const price = QuoteAmountsMapper.applyVatToNetPricePounds(
+          pricingResult.finalPrice,
+          vatRate
+        );
+        return { vehicleType, price, currency: pricingResult.currency || 'GBP' };
       })
     );
 

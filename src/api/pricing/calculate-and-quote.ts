@@ -3,8 +3,7 @@
  * 
  * DESIGN NOTES:
  * - Creates client-facing independent quotes (booking_id = NULL)
- * - VAT is NOT calculated at quote stage (vat_pence = 0, vat_rate = 0)
- * - Tax treatment applied later when quote converted to booking
+ * - VAT from organization_settings.vat_rate (0 = same client total as engine net)
  * - API response matches DB persistence exactly
  * 
  * This endpoint:
@@ -15,6 +14,8 @@
 
 import { Request, Response } from 'express';
 import { PricingEngine } from '../../services/PricingEngine';
+import { OrganizationSettingsService } from '../../services/OrganizationSettingsService';
+import { QuoteAmountsMapper } from '../../services/mappers/quoteAmountsMapper';
 import { QuotePersistenceService } from '../../services/quotes';
 import { validatePricingRequest } from '../../validators/pricingRequestValidator';
 import { parsePricingRequest } from '../../parsers/pricingRequestParser';
@@ -108,13 +109,28 @@ export async function calculateAndQuote(req: Request, res: Response) {
 
     console.log('✅ Independent quote created:', quoteResult.booking_quote_id);
 
-    // Step 5: Return success response
+    const settings = await OrganizationSettingsService.getOrganizationSettings(organizationId);
+    const clientAmounts = QuoteAmountsMapper.calculateIndependentQuoteAmounts(
+      pricingResult,
+      settings.vat_rate
+    );
+    const clientTotal =
+      Math.round((clientAmounts.totalPence / 100) * 100) / 100;
+    const priceBeforeVAT =
+      Math.round((clientAmounts.netPence / 100) * 100) / 100;
+    const vatAmount =
+      Math.round((clientAmounts.vatPence / 100) * 100) / 100;
+
+    // Step 5: Return success response (finalPrice = what client pays, incl. VAT if configured)
     const response = {
       success: true,
       data: {
         quoteId: quoteResult.booking_quote_id,
         pricing: {
-          finalPrice: pricingResult.finalPrice,
+          finalPrice: clientTotal,
+          priceBeforeVAT,
+          vatAmount,
+          vatRate: clientAmounts.vatRate,
           currency: pricingResult.currency || 'GBP',
           breakdown: pricingResult.bookingBreakdown,
           legs: pricingResult.legs,

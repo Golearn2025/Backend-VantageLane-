@@ -11,6 +11,7 @@ import { supabase } from '../config/supabase';
 import { PricingResult, NormalizedPricingRequest, LegBreakdown } from '../types/pricing.types';
 import { buildBookingLineItems, buildLegLineItems, buildTripMetadata } from './quotes/quoteLineItemsBuilder';
 import { QuoteAmountsMapper } from './mappers/quoteAmountsMapper';
+import { OrganizationSettingsService } from './OrganizationSettingsService';
 import { QuoteToBookingService, QuoteToBookingResult } from './quoteToBookingService';
 
 export interface QuoteCreationResult {
@@ -47,8 +48,11 @@ export class QuoteService {
         console.error('  Full:', JSON.stringify(requestData, null, 2));
       }
 
-      // Delegate amount calculations to mapper
-      const amounts = QuoteAmountsMapper.calculateIndependentQuoteAmounts(pricingResult);
+      const settings = await OrganizationSettingsService.getOrganizationSettings(organizationId);
+      const amounts = QuoteAmountsMapper.calculateIndependentQuoteAmounts(
+        pricingResult,
+        settings.vat_rate
+      );
       const split = QuoteAmountsMapper.splitSubtotal(pricingResult);
 
       // Vehicle vs Services split (matching createBookingQuote semantics)
@@ -90,7 +94,7 @@ export class QuoteService {
           // Required pricing fields
           subtotal_pence: amounts.subtotalPence,
           discount_pence: amounts.discountPence,
-          vat_rate: 0,
+          vat_rate: amounts.vatRate,
           vat_pence: amounts.vatPence,
           total_pence: amounts.totalPence,
 
@@ -260,7 +264,8 @@ export class QuoteService {
     const bookingLegId = crypto.randomUUID();
 
     // Delegate amount calculations to mapper
-    const amounts = QuoteAmountsMapper.calculateLegQuoteAmounts(leg, 0.20);
+    const settings = await OrganizationSettingsService.getOrganizationSettings(organizationId);
+    const amounts = QuoteAmountsMapper.calculateLegQuoteAmounts(leg, settings.vat_rate);
 
     const { data, error } = await supabase
       .from('client_leg_quotes')
@@ -275,7 +280,7 @@ export class QuoteService {
         // Amounts from mapper
         subtotal_pence: amounts.subtotalPence,
         discount_pence: amounts.discountPence,
-        vat_rate: 0.20,
+        vat_rate: amounts.vatRate,
         vat_pence: amounts.vatPence,
         total_pence: amounts.totalPence,
 
@@ -316,8 +321,11 @@ export class QuoteService {
     organizationId: string,
     bookingId: string
   ): Promise<string> {
-    // Delegate amount calculations to mapper
-    const amounts = QuoteAmountsMapper.calculateBookingQuoteAmounts(pricingResult);
+    const settings = await OrganizationSettingsService.getOrganizationSettings(organizationId);
+    const amounts = QuoteAmountsMapper.calculateBookingQuoteAmounts(
+      pricingResult,
+      settings.vat_rate
+    );
     const split = QuoteAmountsMapper.splitSubtotal(pricingResult);
 
     // Build trip metadata before insert
@@ -338,7 +346,7 @@ export class QuoteService {
         // Amounts from mapper
         subtotal_pence: amounts.subtotalPence,
         discount_pence: amounts.discountPence,
-        vat_rate: 0.20,
+        vat_rate: amounts.vatRate,
         vat_pence: amounts.vatPence,
         total_pence: amounts.totalPence,
 

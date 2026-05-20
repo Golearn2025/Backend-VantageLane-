@@ -9,6 +9,8 @@
 
 import { supabase } from '../../config/supabase';
 import { PricingResult, LegBreakdown, NormalizedPricingRequest } from '../../types/pricing.types';
+import { OrganizationSettingsService } from '../OrganizationSettingsService';
+import { QuoteAmountsMapper } from '../mappers/quoteAmountsMapper';
 import { buildBookingLineItems, buildLegLineItems, buildTripMetadata } from './quoteLineItemsBuilder';
 
 export interface QuoteCreationResult {
@@ -25,7 +27,7 @@ export class QuotePersistenceService {
    * 
    * CRITICAL NOTES:
    * - booking_id = NULL (independent quote)
-   * - VAT = 0 at this stage (calculated later at booking conversion)
+   * - VAT from organization_settings.vat_rate (0 = no change to client total)
    * - Per-leg truth stored in booking quote JSON (no client_leg_quotes yet)
    * - Trip metadata persisted for safe quote → booking conversion
    */
@@ -42,12 +44,12 @@ export class QuotePersistenceService {
         throw new Error('Missing bookingBreakdown in PricingResult');
       }
 
-      // Calculate totals
-      const subtotalPence = Math.round(breakdown.subtotal * 100);
-      const discountPence = Math.round(breakdown.discounts.total * 100);
-      const totalPence = Math.round(pricingResult.finalPrice || 0) * 100;
-      const vatPence = 0; // Phase 2A: VAT calculated later
-      const vatRate = 0;
+      const settings = await OrganizationSettingsService.getOrganizationSettings(organizationId);
+      const amounts = QuoteAmountsMapper.calculateIndependentQuoteAmounts(
+        pricingResult,
+        settings.vat_rate
+      );
+      const { subtotalPence, discountPence, vatPence, totalPence, vatRate } = amounts;
 
       // Vehicle vs Services split
       const vehicleSubtotalPence = Math.round((
@@ -239,11 +241,9 @@ export class QuotePersistenceService {
 
     const bookingLegId = leg.booking_leg_id;
 
-    const subtotalPence = Math.round(leg.pricing.subtotal * 100);
-    const discountPence = 0; // Discounts applied at booking level
-    const vatRate = 0.20;
-    const vatPence = Math.round(subtotalPence * vatRate);
-    const totalPence = Math.round(leg.pricing.finalPrice) * 100;
+    const settings = await OrganizationSettingsService.getOrganizationSettings(organizationId);
+    const amounts = QuoteAmountsMapper.calculateLegQuoteAmounts(leg, settings.vat_rate);
+    const { subtotalPence, discountPence, vatPence, totalPence, vatRate } = amounts;
 
     const lineItems = buildLegLineItems(
       leg.pricing,
@@ -308,11 +308,12 @@ export class QuotePersistenceService {
       throw new Error('Missing bookingBreakdown in PricingResult');
     }
 
-    const subtotalPence = Math.round(breakdown.subtotal * 100);
-    const discountPence = Math.round(breakdown.discounts.total * 100);
-    const vatRate = 0.20;
-    const vatPence = Math.round(subtotalPence * vatRate);
-    const totalPence = subtotalPence + vatPence - discountPence;
+    const settings = await OrganizationSettingsService.getOrganizationSettings(organizationId);
+    const amounts = QuoteAmountsMapper.calculateBookingQuoteAmounts(
+      pricingResult,
+      settings.vat_rate
+    );
+    const { subtotalPence, discountPence, vatPence, totalPence, vatRate } = amounts;
 
     // Vehicle vs Services split
     const vehicleSubtotalPence = Math.round((
