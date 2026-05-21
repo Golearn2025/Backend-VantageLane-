@@ -445,6 +445,8 @@ export interface LegBreakdown {
   distance_miles?: number;
   duration_min?: number;
   stops?: TripPoint[]; // Additional stops for this leg
+  /** Per-leg extras IDs; return legs use [] so RPC/push do not duplicate booking extras */
+  addons?: string[];
 
   // Pricing breakdown per leg
   pricing: {
@@ -566,6 +568,8 @@ export interface LegSnapshotData {
   scheduled_at?: string;
   distance_miles?: number;
   duration_min?: number;
+  /** Explicit [] on return legs prevents COALESCE(trip.extras) in convert_quote_to_booking_atomic */
+  addons?: string[];
 
   // Pricing breakdown in PENCE (not pounds!)
   pricing: {

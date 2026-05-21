@@ -220,6 +220,7 @@ async function calculateLegPricing(
 
   // Convert to legacy format for FeeCalculators
   // TripPoint -> TripPointInput conversion for coordinate compatibility
+  const bookingExtras = (request.extras || []).filter(e => e !== 'multi_stop');
   const legacyRequest = {
     bookingType: request.bookingType,
     vehicleType: request.vehicleType,
@@ -229,7 +230,8 @@ async function calculateLegPricing(
     additionalStops: (leg.stops || []).map(toTripPointInput),
     distance: metrics.totalDistance,
     duration: metrics.totalDuration,
-    extras: (request.extras || []).filter(e => e !== 'multi_stop'),
+    // Paid extras (flowers etc.) apply once per return booking — outbound leg only
+    extras: legType === 'outbound' ? bookingExtras : [],
     organizationId: request.organizationId,
   };
 
@@ -262,6 +264,11 @@ async function calculateLegPricing(
 
   await FeeCalculators.finalizeTransportThenServiceItems(breakdown, legacyRequest);
 
+  const legAddons =
+    legType === 'outbound'
+      ? bookingExtras
+      : [];
+
   // Map to LegBreakdown.pricing structure (explicit mapping, not direct assignment)
   return {
     leg_number: legType === 'outbound' ? 1 : 2,
@@ -270,6 +277,16 @@ async function calculateLegPricing(
     pickup: leg.pickup,
     dropoff: leg.dropoff,
     stops: leg.stops,
+    scheduled_at:
+      legType === 'outbound'
+        ? request.dateTime
+        : (request.returnDateTime ?? request.dateTime),
+    distance_miles: metrics.totalDistance,
+    duration_min:
+      metrics.totalDuration != null
+        ? Math.round(metrics.totalDuration)
+        : undefined,
+    addons: legAddons,
     pricing: {
       baseFare: breakdown.baseFare,
       distanceFee: breakdown.distanceFee,

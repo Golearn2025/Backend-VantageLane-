@@ -199,6 +199,7 @@ export function buildBookingLineItems(
         scheduled_at: leg.scheduled_at,
         distance_miles: leg.distance_miles,
         duration_min: leg.duration_min,
+        addons: leg.addons ?? (leg.leg_kind === 'return' ? [] : undefined),
         pricing: {
           base_fare_pence: Math.round(leg.pricing.baseFare * 100),
           distance_fee_pence: Math.round(leg.pricing.distanceFee * 100),

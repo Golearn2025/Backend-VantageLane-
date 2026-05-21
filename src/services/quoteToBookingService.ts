@@ -110,8 +110,45 @@ export class QuoteToBookingService {
             .eq('booking_id', result.booking_id);
           console.log('✅ vehicle_model_id patched on booking_legs:', vehicleModel);
         }
+
+        const legsSnapshot = quoteData?.line_items?.meta?.legs;
+        if (Array.isArray(legsSnapshot) && result.booking_id) {
+          for (const legMeta of legsSnapshot) {
+            const legNumber = legMeta?.leg_number;
+            if (legNumber == null) continue;
+
+            const patch: Record<string, unknown> = {};
+            if (legMeta.distance_miles != null) {
+              patch.distance_miles = legMeta.distance_miles;
+            }
+            if (legMeta.duration_min != null) {
+              patch.duration_min = legMeta.duration_min;
+            }
+            if (legMeta.addons !== undefined) {
+              patch.addons = legMeta.addons;
+            } else if (legMeta.leg_kind === 'return') {
+              patch.addons = [];
+            }
+
+            if (Object.keys(patch).length === 0) continue;
+
+            const { error: legPatchError } = await supabase
+              .from('booking_legs')
+              .update(patch)
+              .eq('booking_id', result.booking_id)
+              .eq('leg_number', legNumber);
+
+            if (legPatchError) {
+              console.error(
+                `⚠️  leg ${legNumber} snapshot patch failed:`,
+                legPatchError.message
+              );
+            }
+          }
+          console.log('✅ booking_legs patched from quote legs snapshot');
+        }
       } catch (modelPatchError: any) {
-        console.error('⚠️  vehicle_model_id patch failed (non-blocking):', modelPatchError);
+        console.error('⚠️  quote legs patch failed (non-blocking):', modelPatchError);
       }
 
       // STEP 4: Create financial snapshot for the booking
