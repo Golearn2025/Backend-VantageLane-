@@ -1,11 +1,9 @@
 /**
  * Organization Settings Service
  * 
- * Fetches organization-specific settings from Supabase:
- * - Platform commission percentage
- * - Operator commission percentage
- * - VAT rate
- * - Other organization-level configurations
+ * Fetches organization-specific settings from Supabase (organization_settings).
+ * Admin UI: Prices → VAT & Commission tab (ADMIN-2026 /api/admin/organization-settings).
+ * - platform_commission_pct, operator_commission_pct, vat_rate (decimals, e.g. 0.20 = 20%)
  */
 
 import { supabase } from '../config/supabase';
@@ -27,7 +25,7 @@ interface CacheEntry<T> {
 
 class SettingsCache {
   private cache: Map<string, CacheEntry<any>> = new Map();
-  private readonly TTL_MS = 5 * 60 * 1000; // 5 minutes
+  private readonly TTL_MS = 60 * 1000; // 1 minute — Admin can update VAT/commission frequently
 
   set<T>(key: string, data: T): void {
     this.cache.set(key, {
