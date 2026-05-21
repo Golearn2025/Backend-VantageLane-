@@ -256,35 +256,10 @@ async function calculateLegPricing(
     await calculateMultiStopFee(breakdown, request.additionalStops.length, request.vehicleType, request.organizationId);
   }
 
-  // Calculate additional services (airport fees, zone fees, toll fees, service items)
-  // NOTE: This populates airportFees, zoneFees, tollFees, serviceItemFees
+  // Paid extras (flori etc.) — minimum fare applies to transport only, then these are added
   await FeeCalculators.calculateAdditionalServices(breakdown, legacyRequest);
 
-  // Calculate subtotal
-  breakdown.subtotal =
-    breakdown.baseFare +
-    breakdown.distanceFee +
-    breakdown.timeFee +
-    breakdown.multiStopFees +
-    breakdown.airportFees +
-    breakdown.zoneFees +
-    breakdown.tollFees +
-    breakdown.serviceItemFees +
-    breakdown.waitingFees;
-
-  // Apply multipliers (time-based, demand, etc.)
-  // CRITICAL: applyMultipliers modifies breakdown.subtotal directly by adding multiplier amount
-  await FeeCalculators.applyMultipliers(breakdown, legacyRequest);
-
-  // Apply discounts (corporate, etc.)
-  // CRITICAL: applyDiscounts modifies breakdown.discounts.total and adds corporateDiscount
-  await FeeCalculators.applyDiscounts(breakdown, legacyRequest);
-
-  // Calculate final price (subtotal already includes multipliers)
-  breakdown.finalPrice = breakdown.subtotal - breakdown.discounts.total;
-
-  // Apply minimum fare: if finalPrice < minimum_fare_pence → bump up to minimum
-  await FeeCalculators.applyMinimumFareToFinal(breakdown, legacyRequest);
+  await FeeCalculators.finalizeTransportThenServiceItems(breakdown, legacyRequest);
 
   // Build LegBreakdown
   const legBreakdown: LegBreakdown = {

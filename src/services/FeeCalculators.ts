@@ -410,6 +410,46 @@ export class FeeCalculators {
   }
 
   /**
+   * Transport subtotal before paid service_item fees (flori, upgrades).
+   * Minimum fare applies only to this amount.
+   */
+  static sumTransportSubtotal(breakdown: PricingBreakdownData): number {
+    return (
+      breakdown.baseFare +
+      breakdown.distanceFee +
+      breakdown.timeFee +
+      breakdown.multiStopFees +
+      breakdown.airportFees +
+      breakdown.zoneFees +
+      breakdown.tollFees +
+      breakdown.waitingFees
+    );
+  }
+
+  /**
+   * Multipliers, discounts, and minimum fare on transport only; then add service_item_fees.
+   *
+   * Order: vehicle components → multipliers → discounts → minimum → + service items → finalPrice/subtotal
+   */
+  static async finalizeTransportThenServiceItems(
+    breakdown: PricingBreakdownData,
+    request: PricingRequestData
+  ): Promise<void> {
+    const serviceItemFees = breakdown.serviceItemFees;
+
+    breakdown.subtotal = this.sumTransportSubtotal(breakdown);
+    await this.applyMultipliers(breakdown, request);
+    await this.applyDiscounts(breakdown, request);
+    breakdown.finalPrice = breakdown.subtotal - breakdown.discounts.total;
+    await this.applyMinimumFareToFinal(breakdown, request);
+
+    const transportFinal = breakdown.finalPrice;
+    breakdown.serviceItemFees = serviceItemFees;
+    breakdown.subtotal = transportFinal + serviceItemFees;
+    breakdown.finalPrice = breakdown.subtotal;
+  }
+
+  /**
    * Apply minimum fare to finalPrice (after discounts).
    * Skips silently if minimum_fare_pence is null/0 in DB.
    *

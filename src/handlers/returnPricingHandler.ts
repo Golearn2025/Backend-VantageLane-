@@ -258,29 +258,9 @@ async function calculateLegPricing(
     );
   }
 
-  // Calculate additional services
   await FeeCalculators.calculateAdditionalServices(breakdown, legacyRequest);
 
-  // Calculate subtotal
-  breakdown.subtotal =
-    breakdown.baseFare +
-    breakdown.distanceFee +
-    breakdown.timeFee +
-    breakdown.multiStopFees +
-    breakdown.airportFees +
-    breakdown.zoneFees +
-    breakdown.tollFees +
-    breakdown.serviceItemFees +
-    breakdown.waitingFees;
-
-  // Apply multipliers
-  await FeeCalculators.applyMultipliers(breakdown, legacyRequest);
-
-  // Note: Discount applied at booking level, not per leg
-  breakdown.finalPrice = breakdown.subtotal;
-
-  // Apply minimum fare per leg
-  await FeeCalculators.applyMinimumFareToFinal(breakdown, legacyRequest);
+  await FeeCalculators.finalizeTransportThenServiceItems(breakdown, legacyRequest);
 
   // Map to LegBreakdown.pricing structure (explicit mapping, not direct assignment)
   return {
