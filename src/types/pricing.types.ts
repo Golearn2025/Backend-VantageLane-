@@ -16,6 +16,8 @@ export enum BookingType {
   HOURLY = 'hourly',
   DAILY = 'daily',
   FLEET = 'fleet',
+  FLEET_HOURLY = 'fleet_hourly',
+  FLEET_DAILY = 'fleet_daily',
   BESPOKE = 'bespoke' // Note: BESPOKE out of scope for pricing engine, handled separately
 }
 

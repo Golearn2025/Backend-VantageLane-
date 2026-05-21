@@ -54,7 +54,11 @@ export class FeeCalculators {
     const requestedHours = request.hours || 3;
 
     const hourlyRules = await PricingDataService.getHourlyRules(request.vehicleType, request.organizationId);
-    const rates = await PricingDataService.getVehicleRates(request.vehicleType, 'hourly', request.organizationId);
+    const rates = await PricingDataService.getVehicleRates(
+      request.vehicleType,
+      request.bookingType,
+      request.organizationId
+    );
 
     const billableHours = Math.min(
       Math.max(requestedHours, hourlyRules.minimum_hours),
@@ -85,7 +89,11 @@ export class FeeCalculators {
     const requestedDays = request.days || 1;
 
     const dailyRules = await PricingDataService.getDailyRules(request.vehicleType, request.organizationId);
-    const rates = await PricingDataService.getVehicleRates(request.vehicleType, 'daily', request.organizationId);
+    const rates = await PricingDataService.getVehicleRates(
+      request.vehicleType,
+      request.bookingType,
+      request.organizationId
+    );
 
     // Daily rules define included hours/miles and extra rates
     // Use daily_rate_pence from vehicle_rates for the base daily rate

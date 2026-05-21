@@ -313,11 +313,11 @@ async function calculateFleetVehicleLegPricing(
     details: [],
   };
 
-  // Calculate pricing based on baseServiceType
+  // Calculate pricing based on baseServiceType (vehicle_rates: fleet / fleet_hourly / fleet_daily)
   if (request.baseServiceType === BookingType.ONE_WAY) {
     // FLEET + ONE_WAY: route-based pricing (shared route for all vehicles)
     const legacyRequest = {
-      bookingType: BookingType.ONE_WAY,
+      bookingType: BookingType.FLEET,
       vehicleType: vehicleType,
       dateTime: request.dateTime,
       pickup: toTripPointInput(operationalLeg.pickup),
@@ -361,7 +361,7 @@ async function calculateFleetVehicleLegPricing(
       await FeeCalculators.calculateAdditionalServices(breakdown, extrasRequest);
     }
 
-    breakdown.subtotal = breakdown.baseFare + breakdown.distanceFee + breakdown.timeFee + breakdown.multiStopFees + breakdown.serviceItemFees;
+    await FeeCalculators.finalizeTransportThenServiceItems(breakdown, legacyRequest);
 
   } else if (request.baseServiceType === BookingType.HOURLY) {
     // FLEET + HOURLY: flat hourly rate per vehicle
@@ -370,7 +370,7 @@ async function calculateFleetVehicleLegPricing(
     }
 
     const hourlyRequest = {
-      bookingType: BookingType.HOURLY,
+      bookingType: BookingType.FLEET_HOURLY,
       vehicleType: vehicleType,
       dateTime: request.dateTime,
       hours: request.hours, // Explicit hours from request
@@ -393,7 +393,7 @@ async function calculateFleetVehicleLegPricing(
       await FeeCalculators.calculateAdditionalServices(breakdown, hourlyRequest);
     }
 
-    breakdown.subtotal = breakdown.baseFare + breakdown.serviceItemFees;
+    await FeeCalculators.finalizeTransportThenServiceItems(breakdown, hourlyRequest);
 
   } else if (request.baseServiceType === BookingType.DAILY) {
     // FLEET + DAILY: flat daily rate per vehicle
@@ -402,7 +402,7 @@ async function calculateFleetVehicleLegPricing(
     }
 
     const dailyRequest = {
-      bookingType: BookingType.DAILY,
+      bookingType: BookingType.FLEET_DAILY,
       vehicleType: vehicleType,
       dateTime: request.dateTime,
       days: request.days, // Explicit days from request
@@ -425,25 +425,10 @@ async function calculateFleetVehicleLegPricing(
       await FeeCalculators.calculateAdditionalServices(breakdown, dailyRequest);
     }
 
-    breakdown.subtotal = breakdown.baseFare + breakdown.serviceItemFees;
+    await FeeCalculators.finalizeTransportThenServiceItems(breakdown, dailyRequest);
+  } else {
+    throw new Error(`Unsupported fleet baseServiceType: ${request.baseServiceType}`);
   }
-
-  // Apply time multipliers (modifies breakdown.subtotal directly)
-  // Create base request for multipliers (works for all baseServiceTypes)
-  const multiplierRequest = {
-    bookingType: request.baseServiceType,
-    vehicleType: vehicleType,
-    dateTime: request.dateTime,
-    pickup: toTripPointInput(operationalLeg.pickup),
-    dropoff: toTripPointInput(operationalLeg.dropoff),
-    additionalStops: [],
-    extras: request.extras,
-    organizationId: request.organizationId,
-  };
-  await FeeCalculators.applyMultipliers(breakdown, multiplierRequest);
-
-  // Final price = subtotal after multipliers (no per-vehicle discounts, only fleet-level)
-  breakdown.finalPrice = breakdown.subtotal;
 
   // Map to LegBreakdown structure
   return {

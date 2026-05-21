@@ -217,15 +217,7 @@ async function calculateDailyLegPricing(
     await FeeCalculators.calculateAdditionalServices(breakdown, legacyRequest);
   }
 
-  // Calculate subtotal
-  breakdown.subtotal = breakdown.baseFare + breakdown.serviceItemFees;
-
-  // Apply time multipliers (modifies breakdown.subtotal directly)
-  await FeeCalculators.applyMultipliers(breakdown, legacyRequest);
-
-  // Final price = subtotal after multipliers (no discounts for daily)
-  // IMPORTANT: applyMultipliers modifies subtotal, so finalPrice must be set AFTER
-  breakdown.finalPrice = breakdown.subtotal;
+  await FeeCalculators.finalizeTransportThenServiceItems(breakdown, legacyRequest);
 
   // Map to LegBreakdown structure
   return {

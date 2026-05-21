@@ -116,14 +116,24 @@ export class PricingDataService {
    * @param vehicleCategory - executive, luxury, suv, van
    * @param bookingType - one_way, return, hourly, daily, fleet
    */
-  static async getVehicleRates(vehicleCategory: string, bookingType: string, organizationId?: string): Promise<any> {
-    // Normalize booking type: one_way -> oneway
-    let normalizedBookingType = bookingType.replace('_', '');
+  /**
+   * Map API/bookingType to v_pricing_vehicle_rates.booking_type column.
+   * Preserves fleet_hourly / fleet_daily; return legs use oneway rates.
+   */
+  static normalizeBookingTypeForVehicleRates(bookingType: string): string {
+    const bt = String(bookingType).toLowerCase();
+    if (bt === 'one_way' || bt === 'oneway') return 'oneway';
+    if (bt === 'return') return 'oneway';
+    if (bt === 'fleet_hourly') return 'fleet_hourly';
+    if (bt === 'fleet_daily') return 'fleet_daily';
+    if (bt === 'fleet') return 'fleet';
+    if (bt === 'hourly') return 'hourly';
+    if (bt === 'daily') return 'daily';
+    return bt.replace(/_/g, '');
+  }
 
-    // Return bookings use oneway rates (calculated per leg, then applied with return logic)
-    if (normalizedBookingType === 'return') {
-      normalizedBookingType = 'oneway';
-    }
+  static async getVehicleRates(vehicleCategory: string, bookingType: string, organizationId?: string): Promise<any> {
+    const normalizedBookingType = this.normalizeBookingTypeForVehicleRates(bookingType);
 
     const cacheKey = `vehicle_rates:${vehicleCategory}:${normalizedBookingType}:${organizationId || 'default'}`;
     const cached = cache.get(cacheKey);
