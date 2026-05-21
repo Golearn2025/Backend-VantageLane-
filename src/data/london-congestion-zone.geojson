@@ -1,0 +1,27 @@
+{
+  "type": "Feature",
+  "properties": {
+    "name": "London Congestion Charge Zone (approximate core)",
+    "source": "Vantage Lane pricing — simplified boundary for point-in-polygon checks"
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+      [
+        [-0.1788, 51.5028],
+        [-0.1582, 51.5245],
+        [-0.1298, 51.5288],
+        [-0.0985, 51.5235],
+        [-0.0728, 51.5172],
+        [-0.0685, 51.5055],
+        [-0.0712, 51.4948],
+        [-0.0825, 51.4875],
+        [-0.1055, 51.4838],
+        [-0.1288, 51.4855],
+        [-0.1485, 51.4902],
+        [-0.1655, 51.4968],
+        [-0.1788, 51.5028]
+      ]
+    ]
+  }
+}

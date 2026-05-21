@@ -256,6 +256,10 @@ async function calculateLegPricing(
     await calculateMultiStopFee(breakdown, request.additionalStops.length, request.vehicleType, request.organizationId);
   }
 
+  // Airport + congestion zone (CC polygon); tolls from address keywords
+  await FeeCalculators.calculateZoneFees(breakdown, legacyRequest);
+  await FeeCalculators.calculateTollFees(breakdown, legacyRequest);
+
   // Paid extras (flori etc.) — minimum fare applies to transport only, then these are added
   await FeeCalculators.calculateAdditionalServices(breakdown, legacyRequest);
 

@@ -16,6 +16,7 @@ import {
 } from '../types/pricing.types';
 import { PricingHelpers } from '../utils/PricingHelpers';
 import { PricingDataService } from './PricingDataService';
+import { detectCongestionChargeTouch } from './CongestionZoneService';
 
 export class FeeCalculators {
 
@@ -187,51 +188,59 @@ export class FeeCalculators {
    * Reads from: v_pricing_airport_fees, v_pricing_zone_fees
    */
   static async calculateZoneFees(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
-    // Extract address strings from TripPointInput objects
     const pickupAddress = typeof request.pickup === 'string' ? request.pickup : request.pickup?.address || '';
     const dropoffAddress = typeof request.dropoff === 'string' ? request.dropoff : request.dropoff?.address || '';
 
-    // Airport fees
+    // Airport fees — pickup_fee / dropoff_fee from v_pricing_airport_fees (Admin)
     const pickupAirport = PricingHelpers.detectAirport(pickupAddress);
     const dropoffAirport = PricingHelpers.detectAirport(dropoffAddress);
 
     if (pickupAirport) {
       const airportFee = await PricingDataService.getAirportFee(pickupAirport);
-      if (airportFee) {
+      if (airportFee?.pickup_fee_pence) {
         const fee = PricingDataService.penceToPounds(airportFee.pickup_fee_pence);
         breakdown.airportFees += fee;
         breakdown.details.push({
           component: 'airport_pickup',
           amount: fee,
-          description: `${pickupAirport} pickup fee`
+          description: `${pickupAirport} airport pickup fee`,
         });
       }
     }
 
-    if (dropoffAirport && dropoffAirport !== pickupAirport) {
+    if (dropoffAirport) {
       const airportFee = await PricingDataService.getAirportFee(dropoffAirport);
-      if (airportFee) {
-        const fee = PricingDataService.penceToPounds(airportFee.dropoff_fee_pence || airportFee.pickup_fee_pence);
+      const dropoffPence =
+        airportFee?.dropoff_fee_pence ?? airportFee?.pickup_fee_pence ?? 0;
+      if (dropoffPence > 0) {
+        const fee = PricingDataService.penceToPounds(dropoffPence);
         breakdown.airportFees += fee;
         breakdown.details.push({
           component: 'airport_dropoff',
           amount: fee,
-          description: `${dropoffAirport} dropoff fee`
+          description: `${dropoffAirport} airport dropoff fee`,
         });
       }
     }
 
-    // Congestion and zone fees
-    const zones = PricingHelpers.detectZones(pickupAddress, dropoffAddress);
-    for (const zone of zones) {
-      const zoneFee = await PricingDataService.getZoneFee(zone);
-      if (zoneFee) {
-        const fee = PricingDataService.penceToPounds(zoneFee.fee_pence);
+    // Congestion Charge only — point-in-polygon on lat/lng (no ULEZ/LEZ)
+    const ccTouch = detectCongestionChargeTouch(request.pickup, request.dropoff);
+    if (ccTouch) {
+      const zoneFee = await PricingDataService.getZoneFee('CONGESTION');
+      const feePence = zoneFee?.fee_pence ?? 0;
+      if (feePence > 0) {
+        const fee = PricingDataService.penceToPounds(feePence);
         breakdown.zoneFees += fee;
+        const where =
+          ccTouch === 'both'
+            ? 'pickup and dropoff in congestion zone'
+            : ccTouch === 'pickup'
+              ? 'pickup in congestion zone'
+              : 'dropoff in congestion zone';
         breakdown.details.push({
-          component: 'zone_fee',
+          component: 'congestion_charge',
           amount: fee,
-          description: `${zoneFee.zone_name || zone} zone fee`
+          description: `Congestion charge (${where})`,
         });
       }
     }

@@ -41,6 +41,35 @@ export interface ReturnPricingContext {
 }
 
 /**
+ * Return booking extras split:
+ * - Outbound (leg 1): all selected extras (free + paid client charges once).
+ * - Return (leg 2): only free/included amenities (price_pence = 0) so driver sees WiFi, meet-greet, etc. on both trips.
+ */
+async function resolveReturnLegExtras(
+  bookingExtras: string[],
+  legType: 'outbound' | 'return',
+  organizationId?: string
+): Promise<string[]> {
+  if (legType === 'outbound') {
+    return bookingExtras;
+  }
+  if (bookingExtras.length === 0) {
+    return [];
+  }
+
+  const items = await PricingDataService.getServiceItemsByIds(
+    bookingExtras,
+    organizationId
+  );
+  const paidIds = new Set(
+    items
+      .filter((item) => (item.price_pence ?? 0) > 0)
+      .map((item) => item.id as string)
+  );
+  return bookingExtras.filter((id) => !paidIds.has(id));
+}
+
+/**
  * Main handler for RETURN pricing
  * 
  * Flow:
@@ -221,6 +250,11 @@ async function calculateLegPricing(
   // Convert to legacy format for FeeCalculators
   // TripPoint -> TripPointInput conversion for coordinate compatibility
   const bookingExtras = (request.extras || []).filter(e => e !== 'multi_stop');
+  const legExtras = await resolveReturnLegExtras(
+    bookingExtras,
+    legType,
+    request.organizationId
+  );
   const legacyRequest = {
     bookingType: request.bookingType,
     vehicleType: request.vehicleType,
@@ -230,8 +264,7 @@ async function calculateLegPricing(
     additionalStops: (leg.stops || []).map(toTripPointInput),
     distance: metrics.totalDistance,
     duration: metrics.totalDuration,
-    // Paid extras (flowers etc.) apply once per return booking — outbound leg only
-    extras: legType === 'outbound' ? bookingExtras : [],
+    extras: legExtras,
     organizationId: request.organizationId,
   };
 
@@ -260,14 +293,14 @@ async function calculateLegPricing(
     );
   }
 
+  await FeeCalculators.calculateZoneFees(breakdown, legacyRequest);
+  await FeeCalculators.calculateTollFees(breakdown, legacyRequest);
+
   await FeeCalculators.calculateAdditionalServices(breakdown, legacyRequest);
 
   await FeeCalculators.finalizeTransportThenServiceItems(breakdown, legacyRequest);
 
-  const legAddons =
-    legType === 'outbound'
-      ? bookingExtras
-      : [];
+  const legAddons = legExtras;
 
   // Map to LegBreakdown.pricing structure (explicit mapping, not direct assignment)
   return {

@@ -361,6 +361,9 @@ async function calculateFleetVehicleLegPricing(
       await FeeCalculators.calculateAdditionalServices(breakdown, extrasRequest);
     }
 
+    await FeeCalculators.calculateZoneFees(breakdown, legacyRequest);
+    await FeeCalculators.calculateTollFees(breakdown, legacyRequest);
+
     await FeeCalculators.finalizeTransportThenServiceItems(breakdown, legacyRequest);
 
   } else if (request.baseServiceType === BookingType.HOURLY) {
