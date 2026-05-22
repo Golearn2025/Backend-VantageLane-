@@ -14,7 +14,7 @@ import {
   PricingRequestData,
   VehicleType
 } from '../types/pricing.types';
-import { PricingHelpers } from '../utils/PricingHelpers';
+import { PricingHelpers, type TimePeriodConfig } from '../utils/PricingHelpers';
 import { PricingDataService } from './PricingDataService';
 import { detectCongestionChargeTouch } from './CongestionZoneService';
 
@@ -333,37 +333,41 @@ export class FeeCalculators {
     // Get time rules to determine time period config
     const timeRules = await PricingDataService.getTimeRules();
 
-    // Build time period config from rules
-    const timePeriodConfig: any = {};
+    // Build time period config from rules (London wall-clock matching)
+    const timePeriodConfig: Record<string, { start?: string; end?: string; days?: number[] }> = {};
     timeRules.forEach(rule => {
       if (rule.start_time && rule.end_time) {
         timePeriodConfig[rule.rule_name] = {
           start: rule.start_time,
           end: rule.end_time,
-          days: rule.day_of_week !== null ? [rule.day_of_week] : [0, 1, 2, 3, 4, 5, 6]
+          days: rule.day_of_week !== null ? [rule.day_of_week] : [0, 1, 2, 3, 4, 5, 6],
+        };
+      } else if (rule.rule_name === 'weekend') {
+        timePeriodConfig[rule.rule_name] = {
+          days: rule.day_of_week !== null ? [rule.day_of_week] : [0, 6],
         };
       } else {
         timePeriodConfig[rule.rule_name] = {
-          days: rule.day_of_week !== null ? [rule.day_of_week] : []
+          days: rule.day_of_week !== null ? [rule.day_of_week] : [],
         };
       }
     });
 
-    const timePeriod = PricingHelpers.getTimePeriod(dateTime, timePeriodConfig);
+    const best = PricingHelpers.resolveBestTimeMultiplier(
+      dateTime,
+      timeRules,
+      timePeriodConfig as TimePeriodConfig
+    );
 
-    // Find the multiplier for this period
-    const rule = timeRules.find(r => r.rule_name === timePeriod);
-    const multiplier = rule ? parseFloat(rule.multiplier) : 1.0;
-
-    if (multiplier !== 1.0) {
-      const multiplierAmount = breakdown.subtotal * (multiplier - 1);
-      breakdown.multipliers[timePeriod] = multiplier;
+    if (best && best.multiplier !== 1.0) {
+      const multiplierAmount = breakdown.subtotal * (best.multiplier - 1);
+      breakdown.multipliers[best.period] = best.multiplier;
       breakdown.subtotal += multiplierAmount;
 
       breakdown.details.push({
         component: 'time_multiplier',
         amount: multiplierAmount,
-        description: `${timePeriod} multiplier (${multiplier}x)`
+        description: `${best.period} multiplier (${best.multiplier}x)`,
       });
     }
   }

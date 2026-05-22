@@ -5,58 +5,145 @@
 
 import { TimePeriod, Coordinates } from '../types/pricing.types';
 
+/** UK bookings use London wall-clock for peak/weekend/night rules (not UTC / browser TZ). */
+export const PRICING_TIMEZONE = 'Europe/London';
+
 // Default time period config (fallback if Supabase doesn't have it)
 const DEFAULT_TIME_CONFIG = {
-  peak_morning: { start: '07:00', end: '09:00', days: [1,2,3,4,5] },
-  peak_evening: { start: '17:00', end: '19:00', days: [1,2,3,4,5] },
-  night: { start: '22:00', end: '06:00', days: [0,1,2,3,4,5,6] },
-  weekend: { days: [0,6] }
+  peak_morning: { start: '07:00', end: '09:00', days: [1, 2, 3, 4, 5, 6, 0] },
+  peak_evening: { start: '17:00', end: '19:00', days: [1, 2, 3, 4, 5, 6, 0] },
+  night: { start: '22:00', end: '06:00', days: [0, 1, 2, 3, 4, 5, 6] },
+  weekend: { days: [0, 6] },
 };
 
+export type TimePeriodConfig = typeof DEFAULT_TIME_CONFIG;
+
+export type LondonWallClock = {
+  day: number;
+  timeString: string;
+};
+
+const TIME_RULE_PRIORITY: TimePeriod[] = [
+  TimePeriod.WEEKEND,
+  TimePeriod.PEAK_MORNING,
+  TimePeriod.PEAK_EVENING,
+  TimePeriod.NIGHT,
+];
+
 export class PricingHelpers {
-  
   /**
-   * Determine time period based on date/time
+   * Wall-clock date/time in Europe/London (matches landing mergeDateAndTime).
    */
-  public static getTimePeriod(dateTime: Date, timePeriodConfig?: typeof DEFAULT_TIME_CONFIG): TimePeriod {
+  public static getLondonWallClock(
+    dateTime: Date,
+    timeZone: string = PRICING_TIMEZONE
+  ): LondonWallClock {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone,
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(dateTime);
+
+    const weekday = parts.find(p => p.type === 'weekday')?.value ?? 'Mon';
+    const hour = parts.find(p => p.type === 'hour')?.value ?? '00';
+    const minute = parts.find(p => p.type === 'minute')?.value ?? '00';
+
+    const dayMap: Record<string, number> = {
+      Sun: 0,
+      Mon: 1,
+      Tue: 2,
+      Wed: 3,
+      Thu: 4,
+      Fri: 5,
+      Sat: 6,
+    };
+
+    return {
+      day: dayMap[weekday] ?? dateTime.getUTCDay(),
+      timeString: `${hour}:${minute}`,
+    };
+  }
+
+  /**
+   * Whether a named rule matches the pickup instant in London local time.
+   */
+  public static matchesTimeRule(
+    ruleName: string,
+    wallClock: LondonWallClock,
+    config: TimePeriodConfig
+  ): boolean {
+    const ruleConfig = (config as Record<string, { start?: string; end?: string; days?: number[] }>)[
+      ruleName
+    ];
+    if (!ruleConfig) {
+      return false;
+    }
+
+    if (ruleName === 'weekend' || (!ruleConfig.start && ruleConfig.days)) {
+      const weekendDays = ruleConfig.days ?? DEFAULT_TIME_CONFIG.weekend.days;
+      return weekendDays.includes(wallClock.day);
+    }
+
+    if (!ruleConfig.start || !ruleConfig.end) {
+      return false;
+    }
+
+    if (ruleConfig.days && !ruleConfig.days.includes(wallClock.day)) {
+      return false;
+    }
+
+    return this.isInTimeRange(wallClock.timeString, {
+      start: ruleConfig.start,
+      end: ruleConfig.end,
+    });
+  }
+
+  /**
+   * Pick the single highest active time multiplier (do not stack, do not use priority order).
+   */
+  public static resolveBestTimeMultiplier(
+    dateTime: Date,
+    timeRules: Array<{ rule_name: string; multiplier: string | number }>,
+    timePeriodConfig?: TimePeriodConfig
+  ): { period: string; multiplier: number } | null {
     const config = timePeriodConfig || DEFAULT_TIME_CONFIG;
-    const hour = dateTime.getUTCHours();
-    const day = dateTime.getUTCDay(); // 0 = Sunday, 6 = Saturday
-    const timeString = `${hour.toString().padStart(2, '0')}:00`;
+    const wallClock = this.getLondonWallClock(dateTime);
 
-    // Weekend check (DB-built configs may omit `weekend`; avoid throwing)
-    const weekendDays = config.weekend?.days ?? DEFAULT_TIME_CONFIG.weekend.days;
-    if (weekendDays.includes(day)) {
-      return TimePeriod.WEEKEND;
+    let best: { period: string; multiplier: number } | null = null;
+
+    for (const periodName of TIME_RULE_PRIORITY) {
+      if (!this.matchesTimeRule(periodName, wallClock, config)) {
+        continue;
+      }
+
+      const rule = timeRules.find(r => r.rule_name === periodName);
+      const factor = rule ? parseFloat(String(rule.multiplier)) : 1.0;
+      if (factor <= 1) {
+        continue;
+      }
+
+      if (!best || factor > best.multiplier) {
+        best = { period: periodName, multiplier: factor };
+      }
     }
 
-    // Peak hours check
-    if (
-      config.peak_morning?.start &&
-      config.peak_morning?.end &&
-      config.peak_morning?.days &&
-      this.isInTimeRange(timeString, config.peak_morning) &&
-      config.peak_morning.days.includes(day)
-    ) {
-      return TimePeriod.PEAK_MORNING;
-    }
+    return best;
+  }
 
-    if (
-      config.peak_evening?.start &&
-      config.peak_evening?.end &&
-      config.peak_evening?.days &&
-      this.isInTimeRange(timeString, config.peak_evening) &&
-      config.peak_evening.days.includes(day)
-    ) {
-      return TimePeriod.PEAK_EVENING;
+  /**
+   * @deprecated Prefer resolveBestTimeMultiplier — kept for compatibility.
+   */
+  public static getTimePeriod(
+    dateTime: Date,
+    timePeriodConfig?: TimePeriodConfig
+  ): TimePeriod {
+    const best = this.resolveBestTimeMultiplier(dateTime, [], timePeriodConfig);
+    if (!best) {
+      return TimePeriod.DAY;
     }
-
-    // Night check
-    if (config.night?.start && config.night?.end && this.isInTimeRange(timeString, config.night)) {
-      return TimePeriod.NIGHT;
-    }
-
-    return TimePeriod.DAY;
+    return best.period as TimePeriod;
   }
 
   /**
