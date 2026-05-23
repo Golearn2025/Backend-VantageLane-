@@ -41,8 +41,21 @@ export class FinancialSnapshotService {
       // Get organization settings (commission rates, VAT)
       const settings = await OrganizationSettingsService.getOrganizationSettings(organizationId);
 
-      // Step 1: Line items (DEPRECATED - no longer writing pricing breakdown to booking_line_items)
-      const lineItemIds: string[] = [];
+      // Step 1: Catalog paid upgrades → booking_line_items (service_items snapshot)
+      let lineItemIds: string[] = [];
+      try {
+        const { BookingCatalogLineItemsService } = await import('./BookingCatalogLineItemsService');
+        lineItemIds = await BookingCatalogLineItemsService.persistPaidUpgradesFromQuote(
+          bookingId,
+          quote,
+          organizationId
+        );
+      } catch (catalogLineError: any) {
+        console.error(
+          '⚠️  Failed to persist catalog line items (paid upgrades):',
+          catalogLineError?.message || catalogLineError
+        );
+      }
 
       // Step 2: Create leg financial snapshots
       const legFinancialIds: string[] = [];

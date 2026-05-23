@@ -21,6 +21,7 @@ import configRoutes from './routes/config';
 import bookingRoutes from './routes/booking';
 import cacheRoutes from './routes/cache.routes';
 import stripeRoutes from './routes/stripe';
+import catalogRoutes from './routes/catalog';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -71,6 +72,7 @@ app.use('/api/config', configRoutes);
 app.use('/api/booking', bookingRoutes);
 app.use('/api/cache', cacheRoutes);
 app.use('/api/stripe', stripeRoutes);
+app.use('/catalog', catalogRoutes);
 
 // Root endpoint
 app.get('/', (req: express.Request, res: express.Response) => {
@@ -83,7 +85,8 @@ app.get('/', (req: express.Request, res: express.Response) => {
       config: '/api/config',
       booking: '/api/booking',
       cache: '/api/cache',
-      stripe: '/api/stripe'
+      stripe: '/api/stripe',
+      catalog: '/catalog'
     },
     timestamp: new Date().toISOString()
   });
