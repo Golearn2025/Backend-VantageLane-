@@ -96,9 +96,12 @@ export class FeeCalculators {
       request.organizationId
     );
 
-    // Daily rules define included hours/miles and extra rates
-    // Use daily_rate_pence from vehicle_rates for the base daily rate
-    const billableDays = requestedDays; // No min/max in current schema
+    // Daily rules: duration bounds (minimum_days / maximum_days) + package copy (included_hours)
+    const minimumDays = Number(dailyRules.minimum_days) > 0 ? Number(dailyRules.minimum_days) : 1;
+    const maximumDays =
+      Number(dailyRules.maximum_days) >= minimumDays ? Number(dailyRules.maximum_days) : minimumDays;
+
+    const billableDays = Math.min(Math.max(requestedDays, minimumDays), maximumDays);
 
     // Convert pence to pounds
     const dailyRate = PricingDataService.penceToPounds(rates.daily_rate_pence);
@@ -106,10 +109,15 @@ export class FeeCalculators {
 
     breakdown.timeFee = dailyFee;
 
+    const durationNote =
+      billableDays !== requestedDays
+        ? ` (requested ${requestedDays}, billed ${billableDays}; min ${minimumDays} / max ${maximumDays} days)`
+        : '';
+
     breakdown.details.push({
       component: 'daily_fee',
       amount: dailyFee,
-      description: `${billableDays} days at £${dailyRate}/day (${dailyRules.included_hours}hrs included)`
+      description: `${billableDays} days at £${dailyRate}/day (${dailyRules.included_hours}hrs included)${durationNote}`
     });
   }
 
