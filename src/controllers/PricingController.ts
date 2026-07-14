@@ -29,11 +29,15 @@ export class PricingController {
         return;
       }
 
-      const requestData: PricingRequestData = req.body;
       const organizationId = req.body.organizationId || 
                             req.headers['x-organization-id'] as string || 
                             process.env.DEFAULT_ORGANIZATION_ID || 
                             '9a5caade-4791-4860-93b5-12b1c4fa9830';
+
+      const requestData: PricingRequestData = {
+        ...req.body,
+        organizationId,
+      };
 
       const parseResult = parsePricingRequest(requestData);
       if (!parseResult.success || !parseResult.data) {
@@ -93,11 +97,15 @@ export class PricingController {
         return;
       }
 
-      const requestData: PricingRequestData = req.body;
       const organizationId = req.body.organizationId || 
                             req.headers['x-organization-id'] as string || 
                             process.env.DEFAULT_ORGANIZATION_ID || 
                             '9a5caade-4791-4860-93b5-12b1c4fa9830';
+
+      const requestData: PricingRequestData = {
+        ...req.body,
+        organizationId,
+      };
 
       const parseResult2 = parsePricingRequest(requestData);
       if (!parseResult2.success || !parseResult2.data) {

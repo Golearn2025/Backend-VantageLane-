@@ -114,7 +114,7 @@ export async function handleDailyPricing(
     }
 
     // 3. Get pricing version ID
-    const pricingVersionId = await PricingDataService.getCurrentPricingVersionId();
+    const pricingVersionId = await PricingDataService.getCurrentPricingVersionId(request.organizationId);
 
     // 4. Calculate leg pricing
     const legBreakdown = await calculateDailyLegPricing(

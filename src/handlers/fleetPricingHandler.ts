@@ -107,7 +107,7 @@ export async function handleFleetPricing(
     }
 
     // 2. Get pricing version ID
-    const pricingVersionId = await PricingDataService.getCurrentPricingVersionId();
+    const pricingVersionId = await PricingDataService.getCurrentPricingVersionId(request.organizationId);
 
     // 3. Build operational legs (1 per vehicle)
     const legs: LegBreakdown[] = [];

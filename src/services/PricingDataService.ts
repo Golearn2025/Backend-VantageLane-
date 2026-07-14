@@ -66,43 +66,43 @@ class DataCache {
 
 const cache = new DataCache();
 
+const DEFAULT_ORGANIZATION_ID =
+  process.env.DEFAULT_ORGANIZATION_ID || '9a5caade-4791-4860-93b5-12b1c4fa9830';
+
 export class PricingDataService {
 
+  static resolveOrganizationId(organizationId?: string): string {
+    return organizationId || DEFAULT_ORGANIZATION_ID;
+  }
+
   /**
-   * Get active pricing version.
+   * Get active pricing version for a specific organization.
    *
-   * Uses maybeSingle() so that:
-   *   - 0 rows → data is null  → clear "no active version" error
-   *   - 2+ rows → Supabase PGRST116 error → clear "multiple active versions" error
-   * The DB-level unique partial index (only_one_active_pricing_version) is the
-   * primary guard; this method is the last-resort code guard.
+   * Each org may have exactly one active published version (DB partial unique index).
+   * Never query globally — multiple partner orgs can be active at the same time.
    */
-  static async getActivePricingVersion(): Promise<any> {
-    const cacheKey = 'active_version';
+  static async getActivePricingVersion(organizationId?: string): Promise<any> {
+    const orgId = this.resolveOrganizationId(organizationId);
+    const cacheKey = `active_version:${orgId}`;
     const cached = cache.get(cacheKey);
     if (cached) return cached;
 
     const { data, error } = await supabase
       .from('pricing_versions')
       .select('*')
+      .eq('organization_id', orgId)
       .eq('is_active', true)
       .maybeSingle();
 
     if (error) {
       console.error('Error fetching active pricing version:', error);
-      if (error.code === 'PGRST116') {
-        throw new Error(
-          'Multiple active pricing versions detected. Exactly one pricing version must be active. ' +
-          'Deactivate the duplicates in the Admin → Pricing → Versions panel.'
-        );
-      }
       throw new Error(`Failed to fetch active pricing version: ${error.message}`);
     }
 
     if (!data) {
       throw new Error(
-        'No active pricing version found. Pricing cannot be calculated. ' +
-        'Go to Admin → Pricing → Versions and activate a version.'
+        `No active pricing version found for organization ${orgId}. Pricing cannot be calculated. ` +
+        'Go to Admin → Prices and activate a published version for this organization.'
       );
     }
 
@@ -118,7 +118,7 @@ export class PricingDataService {
    */
   /**
    * Map API/bookingType to v_pricing_vehicle_rates.booking_type column.
-   * Preserves fleet_hourly / fleet_daily; return legs use oneway rates.
+   * Preserves fleet_hourly / fleet_daily; return legs use oneway rates (2× one-way pricing).
    */
   static normalizeBookingTypeForVehicleRates(bookingType: string): string {
     const bt = String(bookingType).toLowerCase();
@@ -356,13 +356,14 @@ export class PricingDataService {
   /**
    * Get fleet discount settings
    */
-  static async getFleetSettings(): Promise<any> {
-    const cacheKey = 'fleet_settings';
+  static async getFleetSettings(organizationId?: string): Promise<any> {
+    const orgId = this.resolveOrganizationId(organizationId);
+    const cacheKey = `fleet_settings:${orgId}`;
     const cached = cache.get(cacheKey);
     if (cached) return cached;
 
     // Assuming fleet settings are in the version view
-    const version = await this.getActivePricingVersion();
+    const version = await this.getActivePricingVersion(orgId);
 
     const settings = {
       discounts: {
@@ -384,12 +385,13 @@ export class PricingDataService {
   /**
    * Get service policies (multi-stop fee, minimums, etc.)
    */
-  static async getServicePolicies(): Promise<any> {
-    const cacheKey = 'service_policies';
+  static async getServicePolicies(organizationId?: string): Promise<any> {
+    const orgId = this.resolveOrganizationId(organizationId);
+    const cacheKey = `service_policies:${orgId}`;
     const cached = cache.get(cacheKey);
     if (cached) return cached;
 
-    const version = await this.getActivePricingVersion();
+    const version = await this.getActivePricingVersion(orgId);
 
     const policies = {
       multiStop: version.multi_stop_fee_pence ? version.multi_stop_fee_pence / 100 : 15,
@@ -406,12 +408,13 @@ export class PricingDataService {
   /**
    * Get corporate discount settings
    */
-  static async getCorporateDiscounts(): Promise<any> {
-    const cacheKey = 'corporate_discounts';
+  static async getCorporateDiscounts(organizationId?: string): Promise<any> {
+    const orgId = this.resolveOrganizationId(organizationId);
+    const cacheKey = `corporate_discounts:${orgId}`;
     const cached = cache.get(cacheKey);
     if (cached) return cached;
 
-    const version = await this.getActivePricingVersion();
+    const version = await this.getActivePricingVersion(orgId);
 
     const discounts = {
       tier1: version.corporate_tier1_discount || 0.10,
@@ -428,15 +431,16 @@ export class PricingDataService {
    * 
    * @returns Grace threshold in miles and minutes
    */
-  static async getStopGraceThreshold(): Promise<{
+  static async getStopGraceThreshold(organizationId?: string): Promise<{
     miles: number;
     minutes: number;
   }> {
-    const cacheKey = 'stop_grace_threshold';
+    const orgId = this.resolveOrganizationId(organizationId);
+    const cacheKey = `stop_grace_threshold:${orgId}`;
     const cached = cache.get<{ miles: number; minutes: number }>(cacheKey);
     if (cached) return cached;
 
-    const version = await this.getActivePricingVersion();
+    const version = await this.getActivePricingVersion(orgId);
 
     const threshold = {
       miles: version.stop_grace_threshold_miles || 0.5,      // Default: 0.5 miles
@@ -453,7 +457,8 @@ export class PricingDataService {
    * 
    * @returns true if dual quote logic should be used, false for legacy flat fee
    */
-  static async isDualQuoteStopLogicEnabled(): Promise<boolean> {
+  static async isDualQuoteStopLogicEnabled(organizationId?: string): Promise<boolean> {
+    const orgId = this.resolveOrganizationId(organizationId);
     // 1. Check env override (emergency kill switch) - HIGHEST PRIORITY
     const envOverride = process.env.DISABLE_DUAL_QUOTE_STOP_LOGIC;
     if (envOverride === 'true') {
@@ -462,7 +467,7 @@ export class PricingDataService {
     }
 
     // 2. Check DB config (business intent)
-    const version = await this.getActivePricingVersion();
+    const version = await this.getActivePricingVersion(orgId);
     const enabled = version.enable_dual_quote_stop_logic || false;
 
     if (enabled) {
@@ -581,8 +586,8 @@ export class PricingDataService {
   /**
    * Get current pricing version ID
    */
-  static async getCurrentPricingVersionId(): Promise<string> {
-    const version = await this.getActivePricingVersion();
+  static async getCurrentPricingVersionId(organizationId?: string): Promise<string> {
+    const version = await this.getActivePricingVersion(organizationId);
     return version.id;
   }
 
@@ -647,11 +652,7 @@ export class PricingDataService {
     _vehicleType: string,
     organizationId?: string
   ): Promise<{ discount_percentage: number } | null> {
-    let orgId = organizationId;
-    if (!orgId) {
-      const version = await this.getActivePricingVersion();
-      orgId = version?.organization_id;
-    }
+    const orgId = this.resolveOrganizationId(organizationId);
 
     const cacheKey = `return_discount:${orgId || 'default'}`;
     const cached = cache.get<{ discount_percentage: number } | 'none'>(cacheKey);

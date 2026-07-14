@@ -296,7 +296,7 @@ export class FeeCalculators {
   static async calculateAdditionalServices(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
     // Multi-stop fee (legacy)
     if (request.extras?.includes('multi_stop')) {
-      const policies = await PricingDataService.getServicePolicies();
+      const policies = await PricingDataService.getServicePolicies(request.organizationId);
       const fee = policies.multiStop;
       breakdown.multiStopFees += fee;
       breakdown.details.push({
@@ -386,7 +386,7 @@ export class FeeCalculators {
    */
   static async applyDiscounts(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
     if (request.corporateTier) {
-      const discounts = await PricingDataService.getCorporateDiscounts();
+      const discounts = await PricingDataService.getCorporateDiscounts(request.organizationId);
 
       let discountRate = 0;
 

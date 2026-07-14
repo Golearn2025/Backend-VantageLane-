@@ -188,7 +188,7 @@ export async function handleReturnPricing(
 
     // 10. Get pricing version ID
     const pricingVersionId = context.pricingVersionId ||
-      await PricingDataService.getCurrentPricingVersionId();
+      await PricingDataService.getCurrentPricingVersionId(request.organizationId);
 
     // 11. Return complete result
     return {

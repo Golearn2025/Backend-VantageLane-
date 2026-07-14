@@ -70,7 +70,7 @@ export async function handleOneWayPricing(
 
     // 5. Check if dual quote stop logic is enabled and applicable
     console.log('🔍 Checking dual quote feature flag...');
-    const isDualQuoteEnabled = await PricingDataService.isDualQuoteStopLogicEnabled();
+    const isDualQuoteEnabled = await PricingDataService.isDualQuoteStopLogicEnabled(request.organizationId);
     const hasStops = request.additionalStops && request.additionalStops.length > 0;
     console.log(`🎯 isDualQuoteEnabled: ${isDualQuoteEnabled}, hasStops: ${hasStops}`);
 
@@ -155,7 +155,7 @@ export async function handleOneWayPricing(
     }
 
     // 7. Get pricing version ID
-    const activePricingVersion = await PricingDataService.getActivePricingVersion();
+    const activePricingVersion = await PricingDataService.getActivePricingVersion(request.organizationId);
     const pricingVersionId = context.pricingVersionId || activePricingVersion?.id;
 
     // 8. Return complete pricing result
@@ -342,7 +342,7 @@ async function calculateDualQuoteStopPricing(
   );
 
   // 3. Get grace threshold config
-  const graceThreshold = await PricingDataService.getStopGraceThreshold();
+  const graceThreshold = await PricingDataService.getStopGraceThreshold(request.organizationId);
 
   // 4. Build operational leg for direct route (no stops)
   const directRoute: NormalizedRoute = {
@@ -445,7 +445,7 @@ async function calculateMultiStopFee(
 ): Promise<void> {
   try {
     // Get service policies which include multi-stop fee
-    const policies = await PricingDataService.getServicePolicies();
+    const policies = await PricingDataService.getServicePolicies(organizationId);
 
     if (!policies.multiStop || policies.multiStop === 0) {
       return;

@@ -53,7 +53,7 @@ export class BookingTypeHandlers {
   static async applyFleetLogic(breakdown: PricingBreakdownData, request: PricingRequestData): Promise<void> {
     if (!request.fleetConfig) return;
 
-    const fleetSettings = await PricingDataService.getFleetSettings();
+    const fleetSettings = await PricingDataService.getFleetSettings(request.organizationId);
 
     // Calculate total number of vehicles
     const totalVehicles = Object.values(request.fleetConfig).reduce((sum, count) => sum + count, 0);
@@ -66,7 +66,7 @@ export class BookingTypeHandlers {
       if (count === 0) continue;
 
       const vType = vehicleType as VehicleType;
-      const rates = await PricingDataService.getVehicleRates(vType, 'one_way');
+      const rates = await PricingDataService.getVehicleRates(vType, 'one_way', request.organizationId);
 
       // Calculate price for this vehicle type
       let vehiclePrice = 0;
