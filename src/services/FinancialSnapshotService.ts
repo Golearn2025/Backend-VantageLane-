@@ -11,6 +11,8 @@
 
 import { supabase } from '../config/supabase';
 import { OrganizationSettingsService } from './OrganizationSettingsService';
+import { OrganizationFinancialSettingsService } from './OrganizationFinancialSettingsService';
+import { PartnerRevenueShareService } from './PartnerRevenueShareService';
 
 export interface FinancialSnapshotResult {
   booking_financial_id: string;
@@ -619,6 +621,33 @@ export class FinancialSnapshotService {
     const vendorCostPence = driverTargetPayoutPence; // Current model: vendor = driver
     const grossMarginPence = subtotalExVatPence - vendorCostPence;
 
+    const financialSettings =
+      await OrganizationFinancialSettingsService.getOrganizationFinancialSettings(
+        quote.organization_id
+      );
+    const processorFeeEstimate =
+      Math.round(grossAmountPence * financialSettings.processor_fee_pct) +
+      financialSettings.processor_fixed_fee_pence;
+
+    const economicsFromQuote = quote.line_items?.meta?.economics_snapshot;
+    const vehicleCategoryId =
+      economicsFromQuote?.vehicle_category ??
+      quote.line_items?.meta?.legs?.[0]?.vehicle_category ??
+      null;
+    const bookingType = quote.booking_type ?? economicsFromQuote?.booking_type ?? 'oneway';
+
+    const partnerShare = await PartnerRevenueShareService.calculate({
+      organizationId: quote.organization_id,
+      clientNetPence: subtotalExVatPence,
+      clientGrossPence: grossAmountPence,
+      processorFeePence: processorFeeEstimate,
+      platformFeePence,
+      vehicleCategoryId: vehicleCategoryId != null ? String(vehicleCategoryId) : null,
+      scheduledAt: quote.line_items?.meta?.legs?.[0]?.scheduled_at ?? null,
+      bookingType: String(bookingType),
+      includeCurrentBookingInTierCount: true,
+    });
+
     // net_margin_pence: Business net margin after processor fee
     // NULL until payment processed (processor_fee_pence not known yet)
     const netMarginPence: number | null = null;
@@ -692,6 +721,14 @@ export class FinancialSnapshotService {
         driver_pricing_factor_used: driverPricingFactorUsed,
         gross_margin_pence: grossMarginPence,
         net_margin_pence: netMarginPence,
+
+        organization_id: quote.organization_id,
+        estimated_driver_marketplace_pence: partnerShare.estimatedDriverMarketplacePence,
+        contribution_margin_pence: partnerShare.contributionMarginPence,
+        partner_share_pence: partnerShare.partnerSharePence,
+        partner_share_rate_bp: partnerShare.partnerShareRateBp,
+        partner_tier_booking_count: partnerShare.partnerTierBookingCount,
+        vantage_lane_retained_pence: partnerShare.vantageLaneRetainedPence,
 
         // LEGACY COLUMNS - Backward Compatibility (mirror new values)
         driver_payout_pence: driverTargetPayoutPence, // Mirror driver_target_payout_pence

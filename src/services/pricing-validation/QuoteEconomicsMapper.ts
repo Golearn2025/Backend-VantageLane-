@@ -9,6 +9,7 @@
  */
 
 import { QuoteAmountsMapper } from '../mappers/quoteAmountsMapper';
+import { PartnerRevenueShareService } from '../PartnerRevenueShareService';
 import type { OrganizationFinancialSettings } from '../../types/organizationFinancialSettings.types';
 import type {
   QuoteEconomicsExtraItem,
@@ -208,22 +209,12 @@ export class QuoteEconomicsMapper {
 
     const vehicleNet = vehicleSubtotalPence(breakdown);
 
-    const { platformFeePence, operatorFeePence, driverBasePence } = calculateCommissionSplit(
+    const { platformFeePence, operatorFeePence } = calculateCommissionSplit(
       subtotalExVatPence,
       vehicleNet,
       organizationSettings.platform_commission_pct,
       organizationSettings.operator_commission_pct
     );
-
-    const extrasIds = normalizedRequest.extras ?? [];
-    const { items: extras, driverExtrasPayoutPence } = await buildExtrasEconomics(
-      breakdown,
-      extrasIds,
-      organizationId
-    );
-
-    const estimatedDriverPayoutPence = driverBasePence + driverExtrasPayoutPence;
-    const estimatedSupplierCostPence = 0;
 
     const estimatedProcessorFeePence =
       Math.round(clientGrossPence * financialSettings.processor_fee_pct) +
@@ -234,6 +225,34 @@ export class QuoteEconomicsMapper {
       financialSettings
     );
 
+    const extrasIds = normalizedRequest.extras ?? [];
+    const { items: extras, driverExtrasPayoutPence } = await buildExtrasEconomics(
+      breakdown,
+      extrasIds,
+      organizationId
+    );
+
+    const scheduledAt =
+      'dateTime' in normalizedRequest ? normalizedRequest.dateTime : undefined;
+    const vehicleCategory = resolveVehicleCategory(normalizedRequest);
+
+    const partnerShare = await PartnerRevenueShareService.calculate({
+      organizationId,
+      clientNetPence,
+      clientGrossPence,
+      processorFeePence: estimatedProcessorFeePence,
+      platformFeePence: platformFeePence,
+      vehicleCategoryId: vehicleCategory != null ? String(vehicleCategory) : null,
+      scheduledAt: scheduledAt ?? null,
+      bookingType: String(normalizedRequest.bookingType),
+      includeCurrentBookingInTierCount: true,
+    });
+
+    const estimatedDriverMarketplacePence =
+      partnerShare.estimatedDriverMarketplacePence + driverExtrasPayoutPence;
+    const estimatedDriverPayoutPence = estimatedDriverMarketplacePence;
+    const estimatedSupplierCostPence = 0;
+
     const retainedGrossPence = Math.max(
       0,
       clientGrossPence - estimatedProcessorFeePence - operationalReservePence
@@ -241,8 +260,7 @@ export class QuoteEconomicsMapper {
 
     const retainedNetPence = Math.max(
       0,
-      clientNetPence -
-        estimatedDriverPayoutPence -
+      partnerShare.vantageLaneRetainedPence -
         operatorFeePence -
         platformFeePence -
         estimatedSupplierCostPence -
@@ -276,6 +294,8 @@ export class QuoteEconomicsMapper {
       estimated_platform_fee_pence: platformFeePence,
       estimated_operator_payout_pence: operatorFeePence,
       estimated_driver_payout_pence: estimatedDriverPayoutPence,
+      estimated_driver_marketplace_payout_pence: estimatedDriverMarketplacePence,
+      estimated_driver_tier_factor: partnerShare.driverTierFactor,
       estimated_driver_extras_payout_pence: driverExtrasPayoutPence,
       estimated_supplier_cost_pence: estimatedSupplierCostPence,
 
@@ -284,6 +304,12 @@ export class QuoteEconomicsMapper {
 
       retained_gross_pence: retainedGrossPence,
       retained_net_pence: retainedNetPence,
+      contribution_margin_pence: partnerShare.contributionMarginPence,
+      estimated_partner_share_pence: partnerShare.partnerSharePence,
+      partner_share_rate_bp: partnerShare.partnerShareRateBp,
+      partner_tier_booking_count: partnerShare.partnerTierBookingCount,
+      partner_share_enabled: partnerShare.isEnabled,
+      estimated_vantage_lane_retained_pence: partnerShare.vantageLaneRetainedPence,
       estimated_margin_pct: estimatedMarginPct,
 
       distance_miles: resolveDistanceMiles(pricingResult),
@@ -297,6 +323,7 @@ export class QuoteEconomicsMapper {
         commissions_from: 'organization_settings',
         processor_and_reserve_from: 'organization_financial_settings',
         payout_rules_from: 'service_item_payout_rules',
+        partner_share_from: 'partner_revenue_share_tiers',
       },
     };
   }

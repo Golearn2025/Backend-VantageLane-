@@ -38,7 +38,10 @@ export interface QuoteEconomicsSnapshotData {
   /** Accounting-style estimate (FSS-aligned), NOT marketplace tier payout. */
   estimated_platform_fee_pence: number;
   estimated_operator_payout_pence: number;
+  /** Marketplace tier estimate (driver app); preferred over vehicle-only commission split. */
   estimated_driver_payout_pence: number;
+  estimated_driver_marketplace_payout_pence: number;
+  estimated_driver_tier_factor: number | null;
   /** Sum of driver extras payout rules; included in estimated_driver_payout_pence. */
   estimated_driver_extras_payout_pence: number;
   /** Placeholder — supplier cost model not implemented (always 0 in v1). */
@@ -52,6 +55,15 @@ export interface QuoteEconomicsSnapshotData {
   retained_gross_pence: number;
   /** After estimated outflows from net (driver, operator, platform, supplier, reserve). */
   retained_net_pence: number;
+  /** client_net − driver marketplace − processor fee. */
+  contribution_margin_pence: number;
+  /** Partner org share (volume tier on share basis). */
+  estimated_partner_share_pence: number;
+  partner_share_rate_bp: number;
+  partner_tier_booking_count: number;
+  partner_share_enabled: boolean;
+  /** contribution/share basis − partner share. */
+  estimated_vantage_lane_retained_pence: number;
   /** (retained_net_pence / client_gross_pence) × 10000 — basis points (1500 = 15%). */
   estimated_margin_pct: number;
 
@@ -67,6 +79,7 @@ export interface QuoteEconomicsSnapshotData {
     commissions_from: 'organization_settings';
     processor_and_reserve_from: 'organization_financial_settings';
     payout_rules_from: 'service_item_payout_rules';
+    partner_share_from: 'partner_revenue_share_tiers';
   };
 }
 
