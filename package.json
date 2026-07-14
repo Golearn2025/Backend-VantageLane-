@@ -7,7 +7,9 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "clean": "rimraf dist"
+    "clean": "rimraf dist",
+    "test:pricing-validation": "npx ts-node tests/pricing-validation/pricingValidation.test.ts",
+    "test:quote-economics": "npx ts-node tests/pricing-validation/quoteEconomicsMapper.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",

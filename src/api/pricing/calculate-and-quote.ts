@@ -17,6 +17,8 @@ import { PricingEngine } from '../../services/PricingEngine';
 import { OrganizationSettingsService } from '../../services/OrganizationSettingsService';
 import { QuoteAmountsMapper } from '../../services/mappers/quoteAmountsMapper';
 import { QuotePersistenceService } from '../../services/quotes';
+import { QuoteEconomicsMapper } from '../../services/pricing-validation/QuoteEconomicsMapper';
+import { OrganizationFinancialSettingsService } from '../../services/OrganizationFinancialSettingsService';
 import { validatePricingRequest } from '../../validators/pricingRequestValidator';
 import { parsePricingRequest } from '../../parsers/pricingRequestParser';
 import { PricingRequestData } from '../../types/pricing.types';
@@ -87,6 +89,26 @@ export async function calculateAndQuote(req: Request, res: Response) {
       breakdown: pricingResult.bookingBreakdown
     });
 
+    // Phase 1C: quote-time economics snapshot (visibility only — no validation/blocking)
+    const [orgSettings, financialSettings] = await Promise.all([
+      OrganizationSettingsService.getOrganizationSettings(organizationId),
+      OrganizationFinancialSettingsService.getOrganizationFinancialSettings(organizationId),
+    ]);
+
+    const economicsSnapshot = await QuoteEconomicsMapper.buildSnapshot({
+      pricingResult,
+      normalizedRequest,
+      organizationId,
+      organizationSettings: orgSettings,
+      financialSettings,
+    });
+
+    console.log('📊 Quote economics snapshot generated:', {
+      client_gross_pence: economicsSnapshot.client_gross_pence,
+      estimated_margin_bps: economicsSnapshot.estimated_margin_pct,
+      schema_version: economicsSnapshot.schema_version,
+    });
+
     // Step 4: Create independent quote (Phase 2A)
     console.log('📝 Creating independent quote...');
 
@@ -96,7 +118,8 @@ export async function calculateAndQuote(req: Request, res: Response) {
     const quoteResult = await QuotePersistenceService.createIndependentQuote(
       pricingResult,
       normalizedRequest,
-      organizationId
+      organizationId,
+      { economicsSnapshot }
     );
 
     if (!quoteResult.success) {
@@ -109,10 +132,9 @@ export async function calculateAndQuote(req: Request, res: Response) {
 
     console.log('✅ Independent quote created:', quoteResult.booking_quote_id);
 
-    const settings = await OrganizationSettingsService.getOrganizationSettings(organizationId);
     const clientAmounts = QuoteAmountsMapper.calculateIndependentQuoteAmounts(
       pricingResult,
-      settings.vat_rate
+      orgSettings.vat_rate
     );
     const clientTotal =
       Math.round((clientAmounts.totalPence / 100) * 100) / 100;

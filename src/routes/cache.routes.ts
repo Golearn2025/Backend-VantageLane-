@@ -6,6 +6,7 @@
 import express, { Request, Response } from 'express';
 import { PricingDataService } from '../services/PricingDataService';
 import { OrganizationSettingsService } from '../services/OrganizationSettingsService';
+import { OrganizationFinancialSettingsService } from '../services/OrganizationFinancialSettingsService';
 
 const router = express.Router();
 
@@ -20,6 +21,7 @@ router.post('/invalidate', (req: Request, res: Response) => {
     
     PricingDataService.invalidateCache();
     OrganizationSettingsService.invalidateCache(organizationId);
+    OrganizationFinancialSettingsService.invalidateCache(organizationId);
     
     res.json({
       success: true,

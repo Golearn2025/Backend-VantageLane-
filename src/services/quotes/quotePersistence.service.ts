@@ -12,6 +12,12 @@ import { PricingResult, LegBreakdown, NormalizedPricingRequest } from '../../typ
 import { OrganizationSettingsService } from '../OrganizationSettingsService';
 import { QuoteAmountsMapper } from '../mappers/quoteAmountsMapper';
 import { buildBookingLineItems, buildLegLineItems, buildTripMetadata } from './quoteLineItemsBuilder';
+import type { QuoteEconomicsSnapshotData } from '../../types/quoteEconomics.types';
+
+export interface QuoteCreationOptions {
+  /** Phase 1C: frozen quote-time economics snapshot (stored in line_items.meta). */
+  economicsSnapshot?: QuoteEconomicsSnapshotData;
+}
 
 export interface QuoteCreationResult {
   booking_quote_id: string;
@@ -34,7 +40,8 @@ export class QuotePersistenceService {
   static async createIndependentQuote(
     pricingResult: PricingResult,
     requestData: NormalizedPricingRequest,
-    organizationId: string
+    organizationId: string,
+    options?: QuoteCreationOptions
   ): Promise<QuoteCreationResult> {
     try {
       console.log('🎯 Creating independent quote for organization:', organizationId);
@@ -76,6 +83,10 @@ export class QuotePersistenceService {
         pricingResult.dualQuotePricing,
         pricingResult.legs  // 🆕 NEW: Pass legs array for multi-leg bookings
       );
+
+      if (options?.economicsSnapshot) {
+        lineItems.meta.economics_snapshot = options.economicsSnapshot;
+      }
 
       // Insert independent quote
       const { data, error } = await supabase

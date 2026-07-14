@@ -86,6 +86,8 @@ export interface LineItemMeta {
   };
   // 🆕 NEW: Legs snapshot for multi-leg bookings (RETURN, FLEET)
   legs?: import('../../types/pricing.types').LegSnapshotData[];
+  /** Phase 1C: immutable quote-time economics visibility (NOT settlement truth). */
+  economics_snapshot?: import('../../types/quoteEconomics.types').QuoteEconomicsSnapshotData;
 }
 
 export interface LineItems {
