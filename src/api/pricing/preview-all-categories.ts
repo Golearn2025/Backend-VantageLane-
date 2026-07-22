@@ -21,7 +21,10 @@ const ALL_VEHICLE_TYPES = [
 
 export async function previewAllCategories(req: Request, res: Response) {
   try {
-    const organizationId = (req as any).user?.organizationId;
+    const organizationId =
+      req.body?.organizationId ||
+      (req.headers['x-organization-id'] as string) ||
+      (req as any).user?.organizationId;
     if (!organizationId) {
       return res.status(401).json({
         success: false,
