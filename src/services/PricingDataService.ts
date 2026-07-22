@@ -77,14 +77,26 @@ export class PricingDataService {
    * The DB-level unique partial index (only_one_active_pricing_version) is the
    * primary guard; this method is the last-resort code guard.
    */
-  static async getActivePricingVersion(): Promise<any> {
-    const cacheKey = 'active_version';
+  static async getActivePricingVersion(organizationId?: string): Promise<any> {
+    // Multi-tenant: each organization has its own active pricing version
+    // (e.g. Vantage Lane runs "v2", a partner venue runs its own version).
+    // Scope the lookup to a single org so the global query never returns 2+
+    // active rows (which would make maybeSingle() throw PGRST116). When no org
+    // is supplied we fall back to the Vantage Lane org, preserving the previous
+    // behaviour for callers that only need global settings.
+    const orgId =
+      organizationId ||
+      process.env.DEFAULT_ORGANIZATION_ID ||
+      '9a5caade-4791-4860-93b5-12b1c4fa9830';
+
+    const cacheKey = `active_version:${orgId}`;
     const cached = cache.get(cacheKey);
     if (cached) return cached;
 
     const { data, error } = await supabase
       .from('pricing_versions')
       .select('*')
+      .eq('organization_id', orgId)
       .eq('is_active', true)
       .maybeSingle();
 
@@ -92,7 +104,8 @@ export class PricingDataService {
       console.error('Error fetching active pricing version:', error);
       if (error.code === 'PGRST116') {
         throw new Error(
-          'Multiple active pricing versions detected. Exactly one pricing version must be active. ' +
+          `Multiple active pricing versions detected for organization ${orgId}. ` +
+          'Exactly one pricing version must be active per organization. ' +
           'Deactivate the duplicates in the Admin → Pricing → Versions panel.'
         );
       }
@@ -101,7 +114,7 @@ export class PricingDataService {
 
     if (!data) {
       throw new Error(
-        'No active pricing version found. Pricing cannot be calculated. ' +
+        `No active pricing version found for organization ${orgId}. Pricing cannot be calculated. ` +
         'Go to Admin → Pricing → Versions and activate a version.'
       );
     }

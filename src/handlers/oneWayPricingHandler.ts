@@ -154,8 +154,11 @@ export async function handleOneWayPricing(
       };
     }
 
-    // 7. Get pricing version ID
-    const activePricingVersion = await PricingDataService.getActivePricingVersion();
+    // 7. Get pricing version ID (scoped to this booking's organization so the
+    // correct per-tenant active version is used — e.g. VL "v2" vs a partner's).
+    const activePricingVersion = await PricingDataService.getActivePricingVersion(
+      request.organizationId
+    );
     const pricingVersionId = context.pricingVersionId || activePricingVersion?.id;
 
     // 8. Return complete pricing result
