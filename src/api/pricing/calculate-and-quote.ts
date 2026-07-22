@@ -25,8 +25,14 @@ export async function calculateAndQuote(req: Request, res: Response) {
   try {
     console.log('🎯 Phase 2A: Calculate and Quote request received');
 
-    // Get organizationId from authenticated context
-    const organizationId = (req as any).user?.organizationId;
+    // Resolve organizationId: an explicit org in the request (e.g. a partner
+    // kiosk booking on behalf of its venue) takes precedence, then the
+    // x-organization-id header, then the authenticated context. This lets a
+    // multi-tenant caller price against the correct org's active version.
+    const organizationId =
+      req.body?.organizationId ||
+      (req.headers['x-organization-id'] as string) ||
+      (req as any).user?.organizationId;
     if (!organizationId) {
       return res.status(401).json({
         success: false,
@@ -37,7 +43,7 @@ export async function calculateAndQuote(req: Request, res: Response) {
     // Build PricingRequestData from request body
     const requestData: PricingRequestData = {
       ...req.body,
-      organizationId // Inject from auth context
+      organizationId // Resolved org (body > header > auth context)
     };
 
     // Step 1: Validate request using new validator

@@ -21,7 +21,13 @@ const ALL_VEHICLE_TYPES = [
 
 export async function previewAllCategories(req: Request, res: Response) {
   try {
-    const organizationId = (req as any).user?.organizationId;
+    // Resolve organizationId: an explicit org in the request (e.g. a partner
+    // kiosk showing its own venue prices) takes precedence, then the
+    // x-organization-id header, then the authenticated context.
+    const organizationId =
+      req.body?.organizationId ||
+      (req.headers['x-organization-id'] as string) ||
+      (req as any).user?.organizationId;
     if (!organizationId) {
       return res.status(401).json({
         success: false,
