@@ -25,9 +25,14 @@ export async function convertQuoteToBooking(req: Request, res: Response) {
       });
     }
 
-    // TEMPORARY: Use test organizationId for development when auth is not configured
-    // TODO: Remove this fallback once frontend auth is fully integrated
-    const organizationId = (req as any).user?.organizationId || '00000000-0000-0000-0000-000000000001';
+    // Resolve org: an explicit org in the request (e.g. a partner kiosk booking
+    // on behalf of its venue) takes precedence so the quote is matched against
+    // the tenant that actually owns it, then the header, then the auth context.
+    const organizationId =
+      req.body?.organizationId ||
+      (req.headers['x-organization-id'] as string) ||
+      (req as any).user?.organizationId ||
+      '00000000-0000-0000-0000-000000000001';
 
     if (!organizationId) {
       return res.status(401).json({

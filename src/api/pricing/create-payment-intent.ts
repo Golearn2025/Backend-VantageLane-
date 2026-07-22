@@ -73,9 +73,14 @@ router.post('/create-payment-intent', [
       amount
     } = req.body;
 
-    // Get organizationId from auth context (security)
-    // TODO: Implement proper auth middleware
-    const organizationId = '9a5caade-4791-4860-93b5-12b1c4fa9830'; // Temporarily hardcoded for testing
+    // Resolve org: an explicit org in the request (e.g. a partner kiosk paying
+    // for its venue's booking) takes precedence so the payment intent is created
+    // against the tenant that owns the booking, then the header, then the VL default.
+    const organizationId =
+      req.body?.organizationId ||
+      (req.headers['x-organization-id'] as string) ||
+      (req as any).user?.organizationId ||
+      '9a5caade-4791-4860-93b5-12b1c4fa9830';
     if (!organizationId) {
       return res.status(401).json({
         success: false,
