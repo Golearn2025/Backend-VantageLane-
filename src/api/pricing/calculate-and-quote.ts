@@ -40,10 +40,21 @@ export async function calculateAndQuote(req: Request, res: Response) {
       });
     }
 
-    // Build PricingRequestData from request body
+    // Rate card selector, decoupled from the quote owner. A partner kiosk sends
+    // `pricingOrgId` (its negotiated version) while `organizationId` stays the
+    // platform tenant that OWNS the quote/booking/customer. Absent (public site)
+    // → falls back to organizationId, so existing behaviour is byte-identical.
+    const pricingOrgId =
+      req.body?.pricingOrgId ||
+      (req.headers['x-pricing-org-id'] as string) ||
+      organizationId;
+
+    // Build PricingRequestData from request body. The pricing engine selects the
+    // active version by `organizationId`, so we feed it the RATE CARD org here.
+    // The owner org is used separately when persisting the quote (below).
     const requestData: PricingRequestData = {
       ...req.body,
-      organizationId // Resolved org (body > header > auth context)
+      organizationId: pricingOrgId
     };
 
     // Step 1: Validate request using new validator
@@ -102,6 +113,7 @@ export async function calculateAndQuote(req: Request, res: Response) {
     const quoteResult = await QuotePersistenceService.createIndependentQuote(
       pricingResult,
       normalizedRequest,
+      // OWNER org (platform tenant). Priced with pricingOrgId, owned by this org.
       organizationId
     );
 

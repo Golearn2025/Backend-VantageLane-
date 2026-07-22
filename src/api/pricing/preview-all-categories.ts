@@ -35,6 +35,15 @@ export async function previewAllCategories(req: Request, res: Response) {
       });
     }
 
+    // Rate card selector (decoupled from the booking owner). A partner kiosk
+    // sends `pricingOrgId` to price against its own negotiated version while the
+    // booking stays owned by the platform tenant. Absent (e.g. public site) →
+    // falls back to organizationId, so existing behaviour is unchanged.
+    const pricingOrgId =
+      req.body?.pricingOrgId ||
+      (req.headers['x-pricing-org-id'] as string) ||
+      organizationId;
+
     // Fleet preview: calculate per-vehicle prices using the underlying service type.
     // The full fleet quote (with fleetConfig) is handled by calculate-and-quote.
     let body = req.body;
@@ -45,7 +54,7 @@ export async function previewAllCategories(req: Request, res: Response) {
       body = { ...body, bookingType: base };
     }
 
-    const settings = await OrganizationSettingsService.getOrganizationSettings(organizationId);
+    const settings = await OrganizationSettingsService.getOrganizationSettings(pricingOrgId);
     const vatRate = settings.vat_rate;
 
     // Calculate prices for all vehicle types in parallel
@@ -54,7 +63,8 @@ export async function previewAllCategories(req: Request, res: Response) {
         const requestData = {
           ...body,
           vehicleType,
-          organizationId,
+          // Price against the rate card org (partner version), not the owner.
+          organizationId: pricingOrgId,
         };
 
         const parseResult = parsePricingRequest(requestData);
