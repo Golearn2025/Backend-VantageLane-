@@ -11,6 +11,7 @@
 import { Request, Response } from 'express';
 import { validationResult } from 'express-validator';
 import { QuoteService } from '../../services/QuoteService';
+import { supabase } from '../../config/supabase';
 
 export async function convertQuoteToBooking(req: Request, res: Response) {
   try {
@@ -57,9 +58,20 @@ export async function convertQuoteToBooking(req: Request, res: Response) {
       });
     }
 
+    // Look up the quote's actual organization — the quote always knows its own
+    // owner regardless of which org the caller claims. This handles the case
+    // where a rate-card org (pricingOrgId) differs from the caller's auth org.
+    const { data: quoteRow } = await supabase
+      .from('client_booking_quotes')
+      .select('organization_id')
+      .eq('id', quoteId)
+      .maybeSingle();
+
+    const resolvedOrgId = quoteRow?.organization_id || organizationId;
+
     const result = await QuoteService.convertQuoteToBooking(
       quoteId,
-      organizationId,
+      resolvedOrgId,
       customerData,
       bookingData
     );
