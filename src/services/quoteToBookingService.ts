@@ -421,9 +421,7 @@ export class QuoteToBookingService {
           email: customerData.email || null,
           first_name: customerData.firstName || null,
           last_name: customerData.lastName || null,
-          phone: customerData.phone || null,
-          customer_type: 'individual',
-          status: 'active'
+          phone: customerData.phone || null
         })
         .select('id')
         .single();
